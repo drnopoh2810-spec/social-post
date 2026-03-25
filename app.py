@@ -26,7 +26,6 @@ def create_app(config_name=None):
     app = Flask(__name__)
     app.config.from_object(config[config_name])
 
-    # Extensions
     db.init_app(app)
     login_manager.init_app(app)
     csrf.init_app(app)
@@ -39,7 +38,6 @@ def create_app(config_name=None):
     def load_user(user_id):
         return db.session.get(User, int(user_id))
 
-    # Blueprints
     from routes.auth import auth_bp
     from routes.dashboard import dashboard_bp
     from routes.api import api_bp
@@ -50,25 +48,21 @@ def create_app(config_name=None):
     app.register_blueprint(api_bp)
     app.register_blueprint(workflow_bp)
 
-    # ── Health check endpoint (no auth, no CSRF) ──────────────────────────────
     @app.route('/health')
     def health():
         try:
-            # Quick DB ping
             db.session.execute(db.text('SELECT 1'))
             db_ok = True
         except Exception:
             db_ok = False
-        status = 'ok' if db_ok else 'degraded'
         code = 200 if db_ok else 503
         return jsonify({
-            'status': status,
+            'status': 'ok' if db_ok else 'degraded',
             'db': db_ok,
             'scheduler': scheduler.running,
             'time': datetime.utcnow().isoformat(),
         }), code
 
-    # Context processor — inject pending_count to all templates
     @app.context_processor
     def inject_globals():
         try:
@@ -78,33 +72,35 @@ def create_app(config_name=None):
             pending = 0
         return {'pending_count': pending}
 
-    # Init DB and seed data
     with app.app_context():
         db.create_all()
         _seed_admin(app)
         _seed_defaults()
-        _seed_from_env()   # sync env vars → DB for dashboard display
+        _seed_from_env()
 
-    # Scheduler
     _setup_scheduler(app)
 
-    # Telegram Bot (non-blocking background thread)
     from services.telegram_bot import start_bot
     start_bot(app)
 
     return app
 
 
+def _seed_admin(app):
+    """Create admin user if not exists."""
+    if not User.query.filter_by(username=app.config['ADMIN_USERNAME']).first():
+        user = User(username=app.config['ADMIN_USERNAME'])
+        user.set_password(app.config['ADMIN_PASSWORD'])
+        db.session.add(user)
+        db.session.commit()
+        logger.info(f"Admin user '{app.config['ADMIN_USERNAME']}' created")
+
+
 def _seed_from_env():
-    """
-    عند بدء التشغيل: اقرأ المتغيرات من os.environ واكتبها في DB.
-    هذا يجعل لوحة التحكم تعرض القيم الصحيحة حتى لو جاءت من HF Secrets.
-    لا يُكتب فوق قيمة موجودة في DB إلا لو الـ env أحدث (أطول).
-    """
+    """Sync env vars → DB so dashboard shows correct values after restart."""
     from database.models import Config as Cfg
-    env_map = Cfg._ENV_MAP
     synced = 0
-    for db_key, env_name in env_map.items():
+    for db_key, env_name in Cfg._ENV_MAP.items():
         env_val = os.environ.get(env_name, '').strip()
         if not env_val:
             continue
@@ -118,18 +114,10 @@ def _seed_from_env():
     if synced:
         db.session.commit()
         logger.info(f"Synced {synced} env vars → DB")
-    """Create admin user if not exists."""
-    if not User.query.filter_by(username=app.config['ADMIN_USERNAME']).first():
-        user = User(username=app.config['ADMIN_USERNAME'])
-        user.set_password(app.config['ADMIN_PASSWORD'])
-        db.session.add(user)
-        db.session.commit()
-        logger.info(f"Admin user '{app.config['ADMIN_USERNAME']}' created")
 
 
 def _seed_defaults():
     """Seed default config, prompts, platforms, models if DB is empty."""
-    # Config defaults
     defaults = {
         'niche': 'تربية خاصة → Special Education 📚\nالإعاقة العقلية → Intellectual Disability 🧠\nاضطرابات التواصل → Communication Disorders 💬\nاضطراب التعلم المحدد → Specific Learning Disorder ✏️\nApplied Behavior Analysis',
         'image_ratio_percent': '90',
@@ -146,136 +134,70 @@ def _seed_defaults():
         if not db.session.get(Config, k):
             db.session.add(Config(key=k, value=v))
 
-    # Platforms
     for name in ['facebook', 'instagram', 'twitter', 'threads', 'linkedin']:
         if not db.session.get(Platform, name):
             db.session.add(Platform(name=name, enabled=True, settings='{}'))
 
-    # AI Models
     model_defs = [
-        ('idea_factory', 'cohere', 'command-r7b-arabic-02-2025'),
-        ('post_writer', 'cohere', 'command-r7b-arabic-02-2025'),
-        ('image_prompt', 'cohere', 'command-r-08-2024'),
-        ('ig_caption', 'cohere', 'command-r7b-arabic-02-2025'),
-        ('x_caption', 'cohere', 'command-r7b-arabic-02-2025'),
+        ('idea_factory',    'cohere', 'command-r7b-arabic-02-2025'),
+        ('post_writer',     'cohere', 'command-r7b-arabic-02-2025'),
+        ('image_prompt',    'cohere', 'command-r-08-2024'),
+        ('ig_caption',      'cohere', 'command-r7b-arabic-02-2025'),
+        ('x_caption',       'cohere', 'command-r7b-arabic-02-2025'),
         ('threads_caption', 'cohere', 'command-r7b-arabic-02-2025'),
-        ('linkedin_caption', 'cohere', 'command-r-plus-08-2024'),
+        ('linkedin_caption','cohere', 'command-r-plus-08-2024'),
     ]
     for stage, provider, model_id in model_defs:
         if not db.session.get(AIModel, stage):
             db.session.add(AIModel(stage=stage, provider=provider, model_id=model_id))
 
-    # Prompts
     _seed_prompts()
-
     db.session.commit()
 
 
 def _seed_prompts():
     prompts_data = [
         {
-            'stage': 'idea_factory',
-            'model': 'command-r7b-arabic-02-2025',
+            'stage': 'idea_factory', 'model': 'command-r7b-arabic-02-2025',
             'temperature': 0.9, 'max_tokens': 4096,
-            'system_prompt': 'You are a world-class Arabic content strategist specializing in educational psychology. Generate diverse, non-repetitive content ideas. Output ONLY a valid JSON array, nothing else.',
-            'user_prompt': '''NICHE: {niche}
-
-CONTEXT:
-- Total ideas: {total_ideas}
-- Published: {total_posted} | Pending: {total_pending}
-
-PERFORMANCE DATA:
-- Average engagement score: {avg_engagement_score}
-- TOP PERFORMING: {top5_performing}
-- WORST PERFORMING: {bottom5_performing}
-
-SATURATED TOPICS (avoid): {saturated_topics}
-IDEAS LAST 7 DAYS: {recent_ideas_text}
-FULL ARCHIVE: {all_ideas_text}
-RECENT STYLES USED: {recent_styles}
-RECENT OPENINGS USED: {recent_openings}
-
-MISSION: Generate exactly 10 content ideas. Each 100% original.
-
-DISTRIBUTION (2 each):
-1. Myth Correction + Evidence
-2. Real Case Story + Lesson
-3. Research/Statistic + Analysis
-4. Step-by-Step + Tool
-5. Discussion Question + Comparison
-
-STYLES: مراقب ميداني | محلل علمي | محاور هادئ | ناقد لطيف | راوي تجربة | مقارن دقيق
-OPENINGS: مشهد ميداني | سؤال صامت | ملاحظة مضادة للحدس | إحصاء مفاجئ | ذاكرة مهنية | مقارنة مباشرة
-
-OUTPUT: Raw JSON array ONLY. No markdown. Start with [ end with ].
-[{"idea":"...","keywords":["#tag1"],"tone":"...","writing_style":"...","opening_type":"..."}]'''
+            'system_prompt': 'You are a world-class Arabic content strategist. Output ONLY a valid JSON array.',
+            'user_prompt': 'NICHE: {niche}\nTotal: {total_ideas} | Posted: {total_posted} | Pending: {total_pending}\nSaturated: {saturated_topics}\nRecent: {recent_ideas_text}\nArchive: {all_ideas_text}\nStyles used: {recent_styles}\nOpenings used: {recent_openings}\n\nGenerate 10 original ideas. Output JSON array only:\n[{"idea":"...","keywords":["#tag"],"tone":"...","writing_style":"...","opening_type":"..."}]',
         },
         {
-            'stage': 'post_writer',
-            'model': 'command-r7b-arabic-02-2025',
+            'stage': 'post_writer', 'model': 'command-r7b-arabic-02-2025',
             'temperature': 0.85, 'max_tokens': 4096,
-            'system_prompt': 'You are a world-class Arabic content writer specializing in educational psychology. Write in pure Egyptian Arabic colloquial dialect.',
-            'user_prompt': '''You are a senior Egyptian field specialist in: {niche}
-
-ASSIGNED WRITING STYLE: {writing_style}
-ASSIGNED OPENING TYPE: {opening_type}
-IDEA: {idea}
-KEYWORDS: {keywords}
-EMOTIONAL TONE: {tone}
-
-WRITE A FACEBOOK POST with FOUR LAYERS:
-LAYER 1 — QUIET OBSERVATION: Open with field moment. No hooks.
-LAYER 2 — SCIENTIFIC WHY: Explain neurological/psychological mechanism.
-LAYER 3 — MYTH CORRECTION: Address common Egyptian misunderstanding gently.
-LAYER 4 — PERSPECTIVE SHIFT: Reframe how reader sees the child.
-
-LANGUAGE: Pure Egyptian Arabic colloquial only. Never Fusha.
-LENGTH: 600-1000 words.
-EMOJIS: Maximum 20.
-HASHTAGS: 3-5 niche-specific at end.
-FORMAT: Plain flowing text only. No markdown.'''
+            'system_prompt': 'You are a world-class Arabic content writer. Write in pure Egyptian Arabic colloquial dialect.',
+            'user_prompt': 'Specialist in: {niche}\nStyle: {writing_style} | Opening: {opening_type}\nIdea: {idea}\nKeywords: {keywords}\nTone: {tone}\n\nWrite Facebook post 600-1000 words. Egyptian Arabic only. Max 20 emojis. 3-5 hashtags at end. Plain text only.',
         },
         {
-            'stage': 'image_prompt',
-            'model': 'command-r-08-2024',
+            'stage': 'image_prompt', 'model': 'command-r-08-2024',
             'temperature': 0.8, 'max_tokens': 2048,
-            'system_prompt': 'You are a world-class visual prompt engineer for Flux 2. Generate precise, structured image prompts.',
-            'user_prompt': '''NICHE: {niche}
-CONCEPT: {idea}
-KEYWORDS: {keywords}
-TONE: {tone}
-CANVAS: {image_width}x{image_height} pixels
-
-Generate ONE Flux 2 image prompt. English only. 350-550 words.
-Start directly with subject. No markdown. Kodak Portra 400 palette. Negative space upper third for text.'''
+            'system_prompt': 'You are a visual prompt engineer for Flux 2.',
+            'user_prompt': 'NICHE: {niche}\nCONCEPT: {idea}\nKEYWORDS: {keywords}\nTONE: {tone}\nCANVAS: {image_width}x{image_height}\n\nGenerate ONE Flux 2 image prompt. English only. 350-550 words. Kodak Portra 400. Negative space upper third.',
         },
         {
-            'stage': 'ig_caption',
-            'model': 'command-r7b-arabic-02-2025',
+            'stage': 'ig_caption', 'model': 'command-r7b-arabic-02-2025',
             'temperature': 0.7, 'max_tokens': 1024,
-            'system_prompt': 'You are a social media specialist. Output only the Instagram caption text.',
-            'user_prompt': 'Rewrite this post for Instagram. Max 1300 words. Keep core message. Add 5-10 Arabic hashtags. Use 8 emojis naturally. Plain text only.\n\nOriginal:\n{post_content}'
+            'system_prompt': 'You are a social media specialist. Output only the Instagram caption.',
+            'user_prompt': 'Rewrite for Instagram. Max 2200 chars. 5-10 Arabic hashtags. 8 emojis. Plain text.\n\nOriginal:\n{post_content}',
         },
         {
-            'stage': 'x_caption',
-            'model': 'command-r7b-arabic-02-2025',
+            'stage': 'x_caption', 'model': 'command-r7b-arabic-02-2025',
             'temperature': 0.7, 'max_tokens': 512,
             'system_prompt': 'You are a social media specialist. Output only the tweet text.',
-            'user_prompt': 'Rewrite for X (Twitter). Max 270 characters. One punchy insight. 1-2 hashtags. No emojis unless space-saving.\n\nOriginal:\n{post_content}'
+            'user_prompt': 'Rewrite for X. Max 270 chars. 1-2 hashtags.\n\nOriginal:\n{post_content}',
         },
         {
-            'stage': 'threads_caption',
-            'model': 'command-r7b-arabic-02-2025',
+            'stage': 'threads_caption', 'model': 'command-r7b-arabic-02-2025',
             'temperature': 0.7, 'max_tokens': 512,
-            'system_prompt': 'You are a social media specialist. Output only the Threads post text.',
-            'user_prompt': 'Rewrite for Threads. Max 450 characters. Conversational tone. One clear idea. 1-2 emojis max. No hashtags.\n\nOriginal:\n{post_content}'
+            'system_prompt': 'You are a social media specialist. Output only the Threads post.',
+            'user_prompt': 'Rewrite for Threads. Max 450 chars. Conversational. 1-2 emojis. No hashtags.\n\nOriginal:\n{post_content}',
         },
         {
-            'stage': 'linkedin_caption',
-            'model': 'command-r-plus-08-2024',
+            'stage': 'linkedin_caption', 'model': 'command-r-plus-08-2024',
             'temperature': 0.7, 'max_tokens': 2048,
-            'system_prompt': 'You are a bilingual content specialist with deep expertise in special education.',
-            'user_prompt': 'Translate and adapt for LinkedIn in American English. Max 2800 characters. Professional yet warm. 3-5 English hashtags. Max 2 emojis. Plain text only.\n\nOriginal Arabic:\n{post_content}'
+            'system_prompt': 'You are a bilingual content specialist in special education.',
+            'user_prompt': 'Translate for LinkedIn in American English. Max 2800 chars. 3-5 English hashtags. Max 2 emojis. Plain text.\n\nOriginal Arabic:\n{post_content}',
         },
     ]
     for p in prompts_data:
@@ -284,25 +206,15 @@ Start directly with subject. No markdown. Kodak Portra 400 palette. Negative spa
 
 
 def _setup_scheduler(app):
-    """
-    Configure APScheduler.
-    - Uses SQLAlchemyJobStore so jobs survive restarts.
-    - Runs in 1 gunicorn worker (gthread) — no duplicate jobs.
-    - Adds a keep-alive self-ping every 25 minutes to prevent
-      HuggingFace Spaces / Render free-tier sleep.
-    """
+    """Configure APScheduler with SQLAlchemy job store + keep-alive ping."""
     if scheduler.running:
         logger.info("Scheduler already running — skipping setup")
         return
 
-    # ── Persistent job store ──────────────────────────────────────────────────
     from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
     db_url = app.config.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///social_post.db')
-    scheduler.configure(jobstores={
-        'default': SQLAlchemyJobStore(url=db_url)
-    })
+    scheduler.configure(jobstores={'default': SQLAlchemyJobStore(url=db_url)})
 
-    # ── Job functions ─────────────────────────────────────────────────────────
     def idea_job():
         from services.workflow_service import run_idea_factory
         run_idea_factory(app)
@@ -312,18 +224,15 @@ def _setup_scheduler(app):
         run_post_engine(app)
 
     def keep_alive_ping():
-        """Self-ping to prevent free-tier sleep (HuggingFace / Render)."""
         try:
             import requests as req
             port = os.environ.get('PORT', '5000')
             req.get(f'http://localhost:{port}/health', timeout=8)
-            logger.debug("Keep-alive ping sent")
-        except Exception as e:
-            logger.debug(f"Keep-alive ping failed (normal on startup): {e}")
+        except Exception:
+            pass
 
-    # ── Load schedule from DB ─────────────────────────────────────────────────
     with app.app_context():
-        idea_time  = Config.get('idea_factory_time', '08:00')
+        idea_time = Config.get('idea_factory_time', '08:00')
         post_times = [
             Config.get('sched_1', '09:00'),
             Config.get('sched_2', '13:00'),
@@ -332,23 +241,16 @@ def _setup_scheduler(app):
         ]
 
     ih, im = idea_time.split(':')
-    scheduler.add_job(
-        idea_job, CronTrigger(hour=int(ih), minute=int(im)),
-        id='idea_factory', replace_existing=True, misfire_grace_time=600
-    )
+    scheduler.add_job(idea_job, CronTrigger(hour=int(ih), minute=int(im)),
+                      id='idea_factory', replace_existing=True, misfire_grace_time=600)
 
     for i, t in enumerate(post_times):
         h, m = t.split(':')
-        scheduler.add_job(
-            post_job, CronTrigger(hour=int(h), minute=int(m)),
-            id=f'post_{i}', replace_existing=True, misfire_grace_time=600
-        )
+        scheduler.add_job(post_job, CronTrigger(hour=int(h), minute=int(m)),
+                          id=f'post_{i}', replace_existing=True, misfire_grace_time=600)
 
-    # Keep-alive every 25 minutes
-    scheduler.add_job(
-        keep_alive_ping, IntervalTrigger(minutes=25),
-        id='keep_alive', replace_existing=True
-    )
+    scheduler.add_job(keep_alive_ping, IntervalTrigger(minutes=25),
+                      id='keep_alive', replace_existing=True)
 
     scheduler.start()
-    logger.info("Scheduler started with SQLAlchemy job store")
+    logger.info("Scheduler started")

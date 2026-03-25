@@ -1,7 +1,6 @@
 """REST API endpoints — called via AJAX from the dashboard."""
 from flask import Blueprint, request, jsonify
 from flask_login import login_required
-from flask_wtf.csrf import csrf_exempt
 from database.models import db, Post, Config, ApiKey, Prompt, Platform, AIModel
 from datetime import datetime
 import json

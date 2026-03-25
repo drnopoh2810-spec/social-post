@@ -1,6 +1,5 @@
 from flask import Blueprint, jsonify, request
 from flask_login import login_required
-from flask_wtf.csrf import csrf_exempt
 from database.models import WorkflowLog
 import threading
 

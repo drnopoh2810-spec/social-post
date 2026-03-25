@@ -14,7 +14,7 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
     WTF_CSRF_SSL_STRICT = False          # يسمح بـ CSRF عبر الـ proxy
-    WTF_
+    WTF_CSRF_TIME_LIMIT = 3600           # ساعة كاملة قبل انتهاء الـ token
 
     ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
     ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin123')

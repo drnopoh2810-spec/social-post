@@ -72,21 +72,34 @@ Password: admin123
 
 ### 1. أضف Secrets في إعدادات الـ Space:
 
+اذهب إلى: `https://huggingface.co/spaces/YOUR_USER/YOUR_SPACE/settings`
+ثم قسم **Repository secrets**
+
+**المتغيرات الإلزامية (التطبيق لا يعمل بدونها):**
 ```
-SECRET_KEY          → مفتاح عشوائي طويل
-ADMIN_USERNAME      → اسم المستخدم
+SECRET_KEY          → مفتاح عشوائي طويل (مثال: openssl rand -hex 32)
+ADMIN_USERNAME      → اسم المستخدم للدخول
 ADMIN_PASSWORD      → كلمة مرور قوية
-COHERE_API_KEY      → مفتاح Cohere
-CLOUDINARY_CLOUD_NAME
-CLOUDINARY_API_KEY
-CLOUDINARY_API_SECRET
-FB_PAGE_ID
-FB_ACCESS_TOKEN
-IG_USER_ID
-IG_ACCESS_TOKEN
-TELEGRAM_BOT_TOKEN
-TELEGRAM_ADMIN_CHAT_ID
+DATABASE_URL        → sqlite:////app/data/social_post.db
+FLASK_ENV           → production
 ```
+
+**المتغيرات الاختيارية (تقدر تضيفها هنا أو من لوحة التحكم):**
+```
+COHERE_API_KEY
+CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET
+FB_PAGE_ID / FB_ACCESS_TOKEN
+IG_USER_ID / IG_ACCESS_TOKEN
+TWITTER_API_KEY / TWITTER_API_SECRET / TWITTER_ACCESS_TOKEN / TWITTER_ACCESS_TOKEN_SECRET
+THREADS_USER_ID / THREADS_ACCESS_TOKEN
+LI_PERSON_ID / LI_ACCESS_TOKEN
+TELEGRAM_BOT_TOKEN / TELEGRAM_ADMIN_CHAT_ID
+WORKER_URL / POLLINATIONS_KEY
+```
+
+**ملاحظة مهمة:**
+المتغيرات اللي تحطها في HF Secrets لها أولوية على لوحة التحكم.
+عند كل restart يتم sync تلقائي من env → DB.
 
 ### 2. ارفع الكود:
 

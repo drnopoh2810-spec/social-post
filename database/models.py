@@ -76,9 +76,49 @@ class Config(db.Model):
     key = db.Column(db.String(100), primary_key=True)
     value = db.Column(db.Text)
 
+    # Mapping: DB key → environment variable name
+    _ENV_MAP = {
+        'niche':                    'NICHE',
+        'cohere_api_key':           'COHERE_API_KEY',
+        'gemini_api_key':           'GEMINI_API_KEY',
+        'cloudinary_cloud_name':    'CLOUDINARY_CLOUD_NAME',
+        'cloudinary_api_key':       'CLOUDINARY_API_KEY',
+        'cloudinary_api_secret':    'CLOUDINARY_API_SECRET',
+        'fb_page_id':               'FB_PAGE_ID',
+        'fb_access_token':          'FB_ACCESS_TOKEN',
+        'ig_user_id':               'IG_USER_ID',
+        'ig_access_token':          'IG_ACCESS_TOKEN',
+        'twitter_api_key':          'TWITTER_API_KEY',
+        'twitter_api_secret':       'TWITTER_API_SECRET',
+        'twitter_access_token':     'TWITTER_ACCESS_TOKEN',
+        'twitter_access_token_secret': 'TWITTER_ACCESS_TOKEN_SECRET',
+        'threads_user_id':          'THREADS_USER_ID',
+        'threads_access_token':     'THREADS_ACCESS_TOKEN',
+        'li_person_id':             'LI_PERSON_ID',
+        'li_access_token':          'LI_ACCESS_TOKEN',
+        'worker_url':               'WORKER_URL',
+        'pollinations_key':         'POLLINATIONS_KEY',
+        'telegram_bot_token':       'TELEGRAM_BOT_TOKEN',
+        'telegram_admin_chat_id':   'TELEGRAM_ADMIN_CHAT_ID',
+    }
+
     @staticmethod
     def get(key, default=''):
+        """
+        Priority:
+        1. Environment variable (HuggingFace Secrets / .env)
+        2. Database value (set via dashboard)
+        3. default
+        """
+        import os
         from database.models import db
+        # Check env first
+        env_name = Config._ENV_MAP.get(key)
+        if env_name:
+            env_val = os.environ.get(env_name, '')
+            if env_val:
+                return env_val
+        # Fallback to DB
         row = db.session.get(Config, key)
         return row.value if row else default
 

@@ -83,6 +83,7 @@ def create_app(config_name=None):
         db.create_all()
         _seed_admin(app)
         _seed_defaults()
+        _seed_from_env()   # sync env vars → DB for dashboard display
 
     # Scheduler
     _setup_scheduler(app)
@@ -94,7 +95,29 @@ def create_app(config_name=None):
     return app
 
 
-def _seed_admin(app):
+def _seed_from_env():
+    """
+    عند بدء التشغيل: اقرأ المتغيرات من os.environ واكتبها في DB.
+    هذا يجعل لوحة التحكم تعرض القيم الصحيحة حتى لو جاءت من HF Secrets.
+    لا يُكتب فوق قيمة موجودة في DB إلا لو الـ env أحدث (أطول).
+    """
+    from database.models import Config as Cfg
+    env_map = Cfg._ENV_MAP
+    synced = 0
+    for db_key, env_name in env_map.items():
+        env_val = os.environ.get(env_name, '').strip()
+        if not env_val:
+            continue
+        existing = db.session.get(Cfg, db_key)
+        if not existing:
+            db.session.add(Cfg(key=db_key, value=env_val))
+            synced += 1
+        elif existing.value != env_val:
+            existing.value = env_val
+            synced += 1
+    if synced:
+        db.session.commit()
+        logger.info(f"Synced {synced} env vars → DB")
     """Create admin user if not exists."""
     if not User.query.filter_by(username=app.config['ADMIN_USERNAME']).first():
         user = User(username=app.config['ADMIN_USERNAME'])

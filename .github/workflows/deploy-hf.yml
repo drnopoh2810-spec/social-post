@@ -3,14 +3,12 @@ name: Deploy to HuggingFace Spaces
 on:
   push:
     branches: [main, master]
-  workflow_dispatch:   # manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   deploy:
     name: Push to HuggingFace Space
     runs-on: ubuntu-latest
-    # Only run if HF_TOKEN secret is configured
-    if: ${{ secrets.HF_TOKEN != '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -24,15 +22,20 @@ jobs:
       - name: Push to HuggingFace Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_SPACE: ${{ secrets.HF_SPACE }}   # format: username/space-name
+          HF_SPACE: ${{ secrets.HF_SPACE }}
         run: |
+          # Skip if secrets not configured
+          if [ -z "${HF_TOKEN}" ] || [ -z "${HF_SPACE}" ]; then
+            echo "⚠️ HF_TOKEN or HF_SPACE not set — skipping deploy"
+            echo "Add them in: GitHub repo → Settings → Secrets → Actions"
+            exit 0
+          fi
+
           git config --global user.email "ci@github.com"
           git config --global user.name "GitHub Actions"
 
-          # Clone the HF Space repo
           git clone https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE} hf_space
 
-          # Sync files (exclude secrets and git internals)
           rsync -av --delete \
             --exclude='.git' \
             --exclude='.env' \
@@ -44,6 +47,6 @@ jobs:
 
           cd hf_space
           git add -A
-          git diff --staged --quiet || git commit -m "Deploy from GitHub: $(git -C .. rev-parse --short HEAD)"
+          git diff --staged --quiet || git commit -m "Deploy: $(git -C .. rev-parse --short HEAD)"
           git push
           echo "✅ Deployed to HuggingFace Space: ${HF_SPACE}"

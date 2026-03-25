@@ -127,6 +127,12 @@ class Config(db.Model):
         'telegram_admin_chat_id':      'TELEGRAM_ADMIN_CHAT_ID',
         # ── Redis ─────────────────────────────────────────────────────────────
         'redis_url':                   'REDIS_URL',
+        # ── Google Sheets ─────────────────────────────────────────────────────
+        'google_sheet_id':             'GOOGLE_SHEET_ID',
+        'google_sheets_credentials':   'GOOGLE_SHEETS_CREDENTIALS',
+        # ── PythonAnywhere (for auto-reload after update) ──────────────────────
+        'pythonanywhere_token':        'PYTHONANYWHERE_TOKEN',
+        'pythonanywhere_username':     'PYTHONANYWHERE_USERNAME',
     }
 
     @staticmethod

@@ -106,6 +106,18 @@ def run_idea_factory(app):
             db.session.add(log)
             db.session.commit()
             logger.info(f"Idea factory: {count} ideas generated")
+
+            # Push new ideas to Google Sheets
+            try:
+                from services.sheets_sync import push_post, is_configured
+                if is_configured():
+                    new_posts = Post.query.filter_by(status="NEW").order_by(
+                        Post.created_at.desc()).limit(count).all()
+                    for p in new_posts:
+                        push_post(p)
+                    logger.debug(f"Pushed {count} new ideas to Google Sheets")
+            except Exception as e:
+                logger.warning(f"Sheets push ideas failed: {e}")
             try:
                 from services.telegram_bot import notify
                 notify(f"🧠 <b>مصنع الأفكار:</b> تم توليد <b>{count}</b> فكرة جديدة ✅")
@@ -244,6 +256,15 @@ def run_post_engine(app):
             db.session.add(WorkflowLog(event="post_engine", message=f"Published post #{post.id} ({post_type})", level="info"))
             db.session.commit()
             logger.info(f"Post #{post.id} published")
+
+            # Push to Google Sheets
+            try:
+                from services.sheets_sync import push_post, is_configured
+                if is_configured():
+                    push_post(post)
+                    logger.debug(f"Post #{post.id} synced to Google Sheets")
+            except Exception as e:
+                logger.warning(f"Sheets push failed: {e}")
             try:
                 from services.telegram_bot import notify
                 ptype_ar = "🖼️ صورة" if post_type == "image" else "📝 نص"

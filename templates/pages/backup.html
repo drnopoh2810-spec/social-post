@@ -48,6 +48,20 @@
   <div id="redis-result" style="margin-top:14px"></div>
 </div>
 
+<!-- Google Sheets Sync -->
+<div class="card">
+  <div class="card-title">📊 مزامنة مع Google Sheets</div>
+  <div class="info-box">
+    💡 Google Sheets كـ backup للمنشورات — لو اتمسحت الـ DB يرجع منها تلقائياً عند الـ restart.
+    <br>أضف في HF Secrets: <code>GOOGLE_SHEETS_CREDENTIALS</code> و <code>GOOGLE_SHEET_ID</code>
+  </div>
+  <div class="btn-group">
+    <button class="btn btn-primary" onclick="pushToSheets()">⬆️ رفع كل المنشورات للـ Sheet</button>
+    <button class="btn btn-secondary" onclick="restoreFromSheets()">⬇️ استعادة من الـ Sheet</button>
+  </div>
+  <div id="sheets-result" style="margin-top:14px"></div>
+</div>
+
 <!-- What's included -->
 <div class="card">
   <div class="card-title">📋 محتوى النسخة الاحتياطية</div>
@@ -112,6 +126,41 @@ function pushToRedis(){
       toast('✅ تم الحفظ في Redis','green');
     } else {
       document.getElementById('redis-result').innerHTML =
+        `<div class="warning-box">❌ ${d.error}</div>`;
+    }
+  });
+}
+
+function pushToSheets(){
+  document.getElementById('sheets-result').innerHTML = '<div style="color:var(--text3)">جاري الرفع...</div>';
+  fetch('/api/backup/push-sheets',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()}
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      document.getElementById('sheets-result').innerHTML =
+        `<div class="info-box" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:#6ee7b7">✅ ${d.message}</div>`;
+      toast('✅ تم الرفع للـ Sheet','green');
+    } else {
+      document.getElementById('sheets-result').innerHTML =
+        `<div class="warning-box">❌ ${d.error}</div>`;
+    }
+  });
+}
+
+function restoreFromSheets(){
+  if(!confirm('سيتم استيراد البيانات من Google Sheets — هل تريد المتابعة؟')) return;
+  document.getElementById('sheets-result').innerHTML = '<div style="color:var(--text3)">جاري الاستعادة...</div>';
+  fetch('/api/backup/restore-sheets',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()}
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      document.getElementById('sheets-result').innerHTML =
+        `<div class="info-box" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:#6ee7b7">✅ ${d.message}</div>`;
+      toast('✅ تم الاستعادة','green');
+    } else {
+      document.getElementById('sheets-result').innerHTML =
         `<div class="warning-box">❌ ${d.error}</div>`;
     }
   });

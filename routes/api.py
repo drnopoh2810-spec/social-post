@@ -336,7 +336,22 @@ def save_telegram_config():
     return jsonify({'ok': True})
 
 
-@api_bp.route('/telegram/test', methods=['POST'])
+@api_bp.route('/prompts/reset', methods=['POST'])
+@login_required
+def reset_prompts():
+    """إعادة ضبط البرومبتات للقيم الافتراضية الجديدة."""
+    from database.models import Prompt
+    # حذف كل البرومبتات الحالية
+    Prompt.query.delete()
+    db.session.commit()
+    # إعادة seed من app.py
+    try:
+        from app import _seed_prompts
+        _seed_prompts()
+        db.session.commit()
+        return jsonify({'ok': True, 'message': 'تم إعادة ضبط البرومبتات ✅'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]})
 @login_required
 def test_telegram():
     try:
@@ -526,3 +541,31 @@ def push_to_redis():
         return jsonify({'ok': True, 'message': 'تم حفظ الإعدادات في Redis ✅'})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]})
+
+
+@api_bp.route('/backup/push-sheets', methods=['POST'])
+@login_required
+def push_to_sheets():
+    """دفع كل المنشورات إلى Google Sheets."""
+    try:
+        from services.sheets_sync import push_all_posts, is_configured
+        if not is_configured():
+            return jsonify({'ok': False, 'error': 'Google Sheets غير مضبوط — أضف GOOGLE_SHEETS_CREDENTIALS و GOOGLE_SHEET_ID'})
+        count = push_all_posts()
+        return jsonify({'ok': True, 'message': f'تم رفع {count} منشور إلى Google Sheets ✅'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]})
+
+
+@api_bp.route('/backup/restore-sheets', methods=['POST'])
+@login_required
+def restore_from_sheets_api():
+    """استعادة المنشورات من Google Sheets إلى DB."""
+    try:
+        from services.sheets_sync import restore_from_sheets, is_configured
+        if not is_configured():
+            return jsonify({'ok': False, 'error': 'Google Sheets غير مضبوط'})
+        count = restore_from_sheets()
+        return jsonify({'ok': True, 'message': f'تم استعادة {count} منشور من Google Sheets ✅'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]})

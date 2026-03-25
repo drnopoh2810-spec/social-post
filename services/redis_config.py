@@ -38,13 +38,17 @@ def get_redis():
 
     try:
         import redis
-        # Upstash requires SSL
+        # Upstash requires TLS — force rediss:// if redis:// provided
+        if url.startswith("redis://") and not url.startswith("rediss://"):
+            url = "rediss://" + url[8:]
+            logger.info("Auto-converted Redis URL to TLS (rediss://)")
         _redis_client = redis.from_url(
             url,
             decode_responses=True,
             socket_connect_timeout=5,
             socket_timeout=5,
             retry_on_timeout=True,
+            ssl_cert_reqs=None,   # Upstash self-signed cert
         )
         _redis_client.ping()
         logger.info("Redis connected successfully")

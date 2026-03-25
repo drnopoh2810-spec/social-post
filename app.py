@@ -41,7 +41,15 @@ def _post_job_runner():
         run_post_engine(_app_instance)
 
 
+def _auto_update_runner():
+    """Check GitHub for updates every 30 minutes."""
+    if _app_instance:
+        from services.auto_updater import check_and_update
+        check_and_update(_app_instance)
+
+
 def _keep_alive_runner():
+    """Self-ping to prevent free-tier sleep."""
     try:
         import requests as req
         port = os.environ.get('PORT', '7860')
@@ -125,6 +133,24 @@ def create_app(config_name=None):
                 sync_db_to_redis()  # First run — push DB → Redis
         except Exception as e:
             logger.warning(f"Redis sync skipped: {e}")
+
+        # Restore posts from Google Sheets if DB is empty
+        try:
+            from services.sheets_sync import is_configured, restore_from_sheets
+            from database.models import Post
+            if is_configured():
+                post_count = Post.query.count()
+                if post_count == 0:
+                    restored = restore_from_sheets()
+                    if restored:
+                        logger.info(f"Restored {restored} posts from Google Sheets")
+                else:
+                    # Sync any newer engagement data from Sheets
+                    restored = restore_from_sheets()
+                    if restored:
+                        logger.info(f"Updated {restored} posts from Google Sheets")
+        except Exception as e:
+            logger.warning(f"Google Sheets restore skipped: {e}")
 
     _app_instance = app
     _setup_scheduler(app)
@@ -234,27 +260,254 @@ def _seed_defaults():
 
 def _seed_prompts():
     prompts = [
+        # ══════════════════════════════════════════════════════════════════════
+        # 1. IDEA FACTORY — مصنع الأفكار
+        # ══════════════════════════════════════════════════════════════════════
         ('idea_factory', 'command-r7b-arabic-02-2025', 0.9, 4096,
-         'You are a world-class Arabic content strategist. Output ONLY a valid JSON array.',
-         'NICHE: {niche}\nTotal: {total_ideas} | Posted: {total_posted} | Pending: {total_pending}\nSaturated: {saturated_topics}\nRecent: {recent_ideas_text}\nArchive: {all_ideas_text}\nStyles: {recent_styles}\nOpenings: {recent_openings}\n\nGenerate 10 original ideas. JSON array only:\n[{"idea":"...","keywords":["#tag"],"tone":"...","writing_style":"...","opening_type":"..."}]'),
+
+         # SYSTEM PROMPT
+         '''أنت خبير استراتيجي في إنتاج محتوى تعليمي وتوعوي على السوشال ميديا.
+مهمتك: توليد أفكار محتوى أصيلة ومتنوعة في المجال المحدد.
+
+قواعد صارمة — لا تخرج عنها أبداً:
+❌ ممنوع: أي إعلان أو ترويج لمنتج أو خدمة
+❌ ممنوع: دعوة لندوة أو ورشة أو كورس أو حجز
+❌ ممنوع: ذكر أسعار أو عروض أو خصومات
+❌ ممنوع: الإعلان عن وظائف أو فرص عمل
+❌ ممنوع: المناسبات والأعياد والتهاني
+❌ ممنوع: الدعاية السياسية أو الدينية
+❌ ممنوع: أي محتوى تسويقي بأي شكل
+
+✅ مسموح فقط:
+• توعية وتثقيف في المجال
+• معلومات علمية عميقة وموثوقة
+• شرح مفاهيم ومصطلحات
+• تصحيح مفاهيم خاطئة شائعة
+• قصص حالات حقيقية ودروس مستفادة
+• إحصائيات وأبحاث علمية محكّمة
+• نصائح عملية قابلة للتطبيق
+• مقارنات توضيحية
+• محتوى كوميدي/ترفيهي في المجال
+• أسئلة للنقاش والتفكير
+
+الناتج: JSON array فقط — لا نص قبله ولا بعده.''',
+
+         # USER PROMPT
+         '''المجال: {niche}
+
+السياق الحالي:
+- إجمالي الأفكار: {total_ideas} | منشور: {total_posted} | انتظار: {total_pending}
+- متوسط الـ engagement: {avg_engagement_score}
+
+أفضل المنشورات أداءً (كرر أنماطها):
+{top5_performing}
+
+أضعف المنشورات (تجنب أنماطها):
+{bottom5_performing}
+
+المواضيع المشبعة (تجنبها تماماً):
+{saturated_topics}
+
+أفكار آخر 7 أيام (لا تكرر):
+{recent_ideas_text}
+
+الأرشيف الكامل (صفر تكرار):
+{all_ideas_text}
+
+الأساليب المستخدمة مؤخراً (نوّع):
+{recent_styles}
+
+الافتتاحيات المستخدمة مؤخراً (نوّع):
+{recent_openings}
+
+══════════════════════════════════════════
+المهمة: ولّد 10 أفكار محتوى أصيلة 100%
+
+التوزيع المطلوب (فكرتان لكل نوع):
+1. تصحيح خرافة شائعة + دليل علمي مبسط
+2. قصة حالة حقيقية + درس مستفاد
+3. إحصائية أو بحث حديث + تحليل تطبيقي
+4. شرح خطوة بخطوة + أداة أو استراتيجية عملية
+5. سؤال للنقاش + مقارنة توضيحية
+
+أساليب الكتابة المتاحة:
+مراقب ميداني | محلل علمي | محاور هادئ | ناقد لطيف | راوي تجربة | مقارن دقيق | كوميدي ساخر | مبسّط للعلوم
+
+أنواع الافتتاحيات المتاحة:
+مشهد ميداني | سؤال صامت | ملاحظة مضادة للحدس | إحصاء مفاجئ | ذاكرة مهنية | مقارنة مباشرة | موقف كوميدي | حقيقة غريبة
+
+تعليمات الجودة:
+- كل فكرة لازم تكون محددة وعميقة (مش عامة)
+- الفكرة لازم تحتوي على: الموضوع + الزاوية + الجمهور المستهدف + التحول المتوقع
+- تجنب أي فكرة فيها رائحة تسويق أو إعلان
+- ركّز على القيمة التعليمية والترفيهية
+
+الناتج: JSON array فقط. لا markdown. ابدأ بـ [ وانتهِ بـ ]
+[{"idea":"وصف تفصيلي للفكرة بالعربية (60+ كلمة)","keywords":["#tag1","#tag2","#tag3"],"tone":"نوع المحتوى","writing_style":"أسلوب الكتابة","opening_type":"نوع الافتتاحية"}]'''),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # 2. POST WRITER — كاتب المنشورات
+        # ══════════════════════════════════════════════════════════════════════
         ('post_writer', 'command-r7b-arabic-02-2025', 0.85, 4096,
-         'You are a world-class Arabic content writer. Write in pure Egyptian Arabic colloquial dialect.',
-         'Specialist in: {niche}\nStyle: {writing_style} | Opening: {opening_type}\nIdea: {idea}\nKeywords: {keywords}\nTone: {tone}\n\nWrite Facebook post 600-1000 words. Egyptian Arabic only. Max 20 emojis. 3-5 hashtags. Plain text only.'),
+
+         # SYSTEM PROMPT
+         '''أنت كاتب محتوى مصري متخصص في التعليم والتوعية.
+أسلوبك: عامية مصرية خالصة — دافئة، ذكية، قريبة من القارئ.
+
+قواعد الكتابة الصارمة:
+❌ ممنوع: أي إعلان أو ترويج أو دعوة لشراء
+❌ ممنوع: ذكر أسعار أو عروض أو خصومات
+❌ ممنوع: دعوة لندوة أو كورس أو حجز
+❌ ممنوع: الفصحى أو اللغة الرسمية الجافة
+❌ ممنوع: الـ clickbait أو العناوين المثيرة الفارغة
+❌ ممنوع: الـ markdown أو الـ bold أو القوائم المرقمة
+❌ ممنوع: عبارات "هل تعلم" أو "لن تصدق" أو "سر"
+
+✅ المطلوب:
+• عامية مصرية طبيعية وسلسة
+• محتوى تعليمي/توعوي/ترفيهي حقيقي
+• نص متدفق بدون تقسيمات مصطنعة
+• قيمة حقيقية في كل سطر''',
+
+         # USER PROMPT
+         '''متخصص في: {niche}
+
+أسلوب الكتابة المطلوب: {writing_style}
+نوع الافتتاحية: {opening_type}
+الفكرة: {idea}
+الكلمات المفتاحية: {keywords}
+النبرة العاطفية: {tone}
+
+══════════════════════════════════════════
+اكتب منشور فيسبوك بالطبقات الأربعة دي:
+
+الطبقة 1 — الافتتاحية الهادئة:
+افتح بالأسلوب المحدد ({opening_type}) بدون hooks أو صدمة مصطنعة.
+مشهد حقيقي أو ملاحظة دقيقة أو سؤال صامت يخلي القارئ يفكر.
+
+الطبقة 2 — العمق العلمي:
+اشرح الآلية العلمية أو النفسية أو السلوكية وراء الموضوع.
+استخدم أمثلة مصرية مألوفة. اخلي المعقد بسيط.
+
+الطبقة 3 — تصحيح المفهوم الخاطئ:
+حدد الفهم الشائع الغلط في مصر وصحّحه بلطف وبدون إدانة.
+"الناس بتفتكر... بس الحقيقة..."
+
+الطبقة 4 — إعادة التأطير:
+جملة أو اتنين بتخلي القارئ يشوف الموضوع بعين تانية.
+مش call to action — مجرد منظور جديد.
+
+قواعد الكتابة:
+• عامية مصرية خالصة — مفيش فصحى خالص
+• الطول: 600-1000 كلمة
+• الإيموجي: 15-20 بحد أقصى، وظيفية مش زينة
+• الهاشتاق: 3-5 في الآخر فقط
+• نص متدفق — مفيش headers أو قوائم أو bold
+• مفيش أي إشارة لمنتج أو خدمة أو سعر'''),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # 3. IMAGE PROMPT — برومبت الصور
+        # ══════════════════════════════════════════════════════════════════════
         ('image_prompt', 'command-r-08-2024', 0.8, 2048,
-         'You are a visual prompt engineer for Flux 2.',
-         'NICHE: {niche}\nCONCEPT: {idea}\nKEYWORDS: {keywords}\nTONE: {tone}\nCANVAS: {image_width}x{image_height}\n\nGenerate ONE Flux 2 image prompt. English only. 350-550 words. Kodak Portra 400. Negative space upper third.'),
+
+         'You are a world-class visual prompt engineer for Flux 2 image generation.',
+
+         '''NICHE: {niche}
+CONCEPT: {idea}
+KEYWORDS: {keywords}
+EMOTIONAL TONE: {tone}
+CANVAS: {image_width}x{image_height} pixels (portrait format)
+
+Generate ONE precise Flux 2 image prompt. English only. 350-500 words.
+
+REQUIRED ELEMENTS (include all):
+1. Subject + camera setup (focal length, aperture, angle)
+2. Lighting (direction, quality, color temperature, shadow behavior)
+3. Three depth planes (foreground/midground/background with focus behavior)
+4. Color palette (2-3 specific tone names, Kodak Portra 400 style)
+5. Symbolic props (readable at thumbnail size)
+6. Negative space (upper third — clean area for text overlay)
+7. Style anchors (editorial photography, Magnum Photos aesthetic)
+8. Human presence (partial only: hands, figure from behind, shoulder)
+
+RULES:
+- Start directly with subject and camera framing
+- No markdown, no headers, no lists, no preamble
+- Avoid: stunning, breathtaking, photorealistic, ultra-detailed, amazing
+- Use: Kodak Portra 400 palette, Hasselblad color science, ISO 400 grain
+- One dominant focal point readable in 0.3 seconds on mobile
+- Clean negative space in upper third for Arabic text overlay
+- Warm, human, documentary feel — not commercial or stock photo'''),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # 4-7. PLATFORM CAPTIONS
+        # ══════════════════════════════════════════════════════════════════════
         ('ig_caption', 'command-r7b-arabic-02-2025', 0.7, 1024,
-         'You are a social media specialist. Output only the Instagram caption.',
-         'Rewrite for Instagram. Max 2200 chars. 5-10 Arabic hashtags. 8 emojis. Plain text.\n\nOriginal:\n{post_content}'),
+         'أنت متخصص في السوشال ميديا. اكتب كابشن Instagram فقط — بدون أي نص تاني.',
+         '''حوّل المنشور ده لكابشن Instagram.
+
+القواعد:
+• بحد أقصى 2200 حرف
+• احتفظ بالرسالة الأساسية
+• 5-10 هاشتاق عربي في الآخر
+• 8 إيموجي طبيعية في النص
+• نص عادي فقط — مفيش markdown
+• مفيش أي إعلان أو ترويج
+
+المنشور الأصلي:
+{post_content}'''),
+
         ('x_caption', 'command-r7b-arabic-02-2025', 0.7, 512,
-         'You are a social media specialist. Output only the tweet.',
-         'Rewrite for X. Max 270 chars. 1-2 hashtags.\n\nOriginal:\n{post_content}'),
+         'أنت متخصص في السوشال ميديا. اكتب تغريدة فقط — بدون أي نص تاني.',
+         '''حوّل المنشور ده لتغريدة X (Twitter).
+
+القواعد:
+• بحد أقصى 270 حرف
+• فكرة واحدة قوية ومركّزة
+• 1-2 هاشتاق بس
+• مفيش إيموجي إلا لو بتوفر مساحة
+• مفيش أي إعلان أو ترويج
+
+المنشور الأصلي:
+{post_content}'''),
+
         ('threads_caption', 'command-r7b-arabic-02-2025', 0.7, 512,
-         'You are a social media specialist. Output only the Threads post.',
-         'Rewrite for Threads. Max 450 chars. Conversational. 1-2 emojis. No hashtags.\n\nOriginal:\n{post_content}'),
+         'أنت متخصص في السوشال ميديا. اكتب بوست Threads فقط — بدون أي نص تاني.',
+         '''حوّل المنشور ده لبوست Threads.
+
+القواعد:
+• بحد أقصى 450 حرف
+• نبرة محادثة وشخصية
+• فكرة واحدة واضحة
+• 1-2 إيموجي بحد أقصى
+• مفيش هاشتاق
+• مفيش أي إعلان أو ترويج
+
+المنشور الأصلي:
+{post_content}'''),
+
         ('linkedin_caption', 'command-r-plus-08-2024', 0.7, 2048,
-         'You are a bilingual content specialist in special education.',
-         'Translate for LinkedIn in American English. Max 2800 chars. 3-5 English hashtags. Max 2 emojis. Plain text.\n\nOriginal Arabic:\n{post_content}'),
+         '''You are a bilingual content specialist with deep expertise in the given field.
+Your job: translate Arabic posts into compelling American English LinkedIn content.
+Never translate word-for-word — always adapt for natural American English flow.
+Output only the final LinkedIn post text, nothing else.''',
+
+         '''Translate and adapt this post for LinkedIn in American English.
+
+RULES:
+- Fluent, natural American English (NOT a literal translation)
+- Adapt Egyptian cultural references for a global professional audience
+- Max 2800 characters
+- Structure: Hook (1-2 punchy sentences) → Core Insight → Practical Takeaway → Closing Question
+- Professional yet warm and human tone
+- Add 3-5 English professional hashtags at the end
+- Max 2 emojis, placed naturally
+- Plain text only — no markdown, no bold, no bullet lists
+- Preserve scientific accuracy and emotional depth
+- NO marketing, NO promotional content, NO calls to buy anything
+
+Original Arabic post:
+{post_content}'''),
     ]
     for stage, model, temp, tokens, sys_p, usr_p in prompts:
         if not db.session.get(Prompt, stage):
@@ -291,6 +544,10 @@ def _setup_scheduler(app):
 
     scheduler.add_job(_keep_alive_runner, IntervalTrigger(minutes=25),
                       id='keep_alive', replace_existing=True)
+
+    # Auto-update from GitHub every 30 minutes
+    scheduler.add_job(_auto_update_runner, IntervalTrigger(minutes=30),
+                      id='auto_update', replace_existing=True)
 
     scheduler.start()
     logger.info("Scheduler started")

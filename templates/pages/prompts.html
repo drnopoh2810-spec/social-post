@@ -44,6 +44,7 @@
 {% endfor %}
 
 <button class="btn btn-primary" onclick="savePrompts()">💾 حفظ جميع البرومبتات</button>
+<button class="btn btn-danger btn-sm" onclick="resetPrompts()" style="margin-right:10px">🔄 إعادة ضبط للافتراضي</button>
 {% endblock %}
 
 {% block extra_js %}
@@ -60,6 +61,15 @@ function savePrompts(){
   }));
   fetch('/api/prompts',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
     .then(r=>r.json()).then(d=>{ if(d.ok) toast('✅ تم حفظ البرومبتات','green'); });
+}
+
+function resetPrompts(){
+  if(!confirm('سيتم حذف كل البرومبتات الحالية وإعادتها للافتراضي الجديد. هل تريد المتابعة؟')) return;
+  fetch('/api/prompts/reset',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()}})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok){ toast('✅ '+d.message,'green'); setTimeout(()=>location.reload(),1000); }
+      else toast('❌ '+d.error,'red');
+    });
 }
 </script>
 {% endblock %}

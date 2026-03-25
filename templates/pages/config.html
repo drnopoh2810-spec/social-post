@@ -61,6 +61,15 @@
   </div>
 </div>
 
+<div class="card">
+  <div class="card-title">☁️ Redis (Upstash) — للحفظ الدائم</div>
+  <div class="info-box">💡 أضف REDIS_URL من <a href="https://console.upstash.com" target="_blank" style="color:var(--accent2)">Upstash</a> لحفظ الإعدادات بشكل دائم بين الـ restarts</div>
+  <div class="form-group">
+    <label>REDIS_URL</label>
+    <input type="password" id="cfg-redis-url" value="{{ cfg.get('redis_url','') }}" placeholder="rediss://default:TOKEN@host:port">
+  </div>
+</div>
+
 <div class="btn-group">
   <button class="btn btn-primary" onclick="saveConfig()">💾 حفظ الإعدادات</button>
 </div>
@@ -82,6 +91,7 @@ function saveConfig(){
     pollinations_key: document.getElementById('cfg-poll').value,
     cohere_api_key: document.getElementById('cfg-cohere').value,
     gemini_api_key: document.getElementById('cfg-gemini').value,
+    redis_url: document.getElementById('cfg-redis-url').value,
   };
   fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
     .then(r=>r.json()).then(d=>{ if(d.ok) toast('✅ تم حفظ الإعدادات','green'); });

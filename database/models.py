@@ -125,6 +125,8 @@ class Config(db.Model):
         # ── Telegram ──────────────────────────────────────────────────────────
         'telegram_bot_token':          'TELEGRAM_BOT_TOKEN',
         'telegram_admin_chat_id':      'TELEGRAM_ADMIN_CHAT_ID',
+        # ── Redis ─────────────────────────────────────────────────────────────
+        'redis_url':                   'REDIS_URL',
     }
 
     @staticmethod

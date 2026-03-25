@@ -24,7 +24,15 @@ def get_redis():
     if _redis_client is not None:
         return _redis_client
 
+    # Try env first, then DB
     url = os.environ.get('REDIS_URL', '')
+    if not url:
+        try:
+            from database.models import Config
+            url = Config.query.get('redis_url')
+            url = url.value if url else ''
+        except Exception:
+            pass
     if not url:
         return None
 

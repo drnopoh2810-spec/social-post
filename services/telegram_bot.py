@@ -311,6 +311,7 @@ def _run_bot(token: str):
 
     from telegram.ext import Application, CommandHandler
 
+    # Fresh isolated event loop for this thread
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     _bot_loop = loop
@@ -321,31 +322,35 @@ def _run_bot(token: str):
         _bot_instance = tg_app.bot
 
         for cmd, handler in [
-            ("start",     cmd_start),
-            ("help",      cmd_help),
-            ("status",    cmd_status),
-            ("ideas",     cmd_ideas),
-            ("post",      cmd_post),
-            ("pending",   cmd_pending),
-            ("posted",    cmd_posted),
-            ("logs",      cmd_logs),
-            ("keys",      cmd_keys),
-            ("platforms", cmd_platforms),
-            ("pause",     cmd_pause),
-            ("resume",    cmd_resume),
-            ("skip",      cmd_skip),
-            ("delete",    cmd_delete),
+            ("start",     cmd_start),   ("help",      cmd_help),
+            ("status",    cmd_status),  ("ideas",     cmd_ideas),
+            ("post",      cmd_post),    ("pending",   cmd_pending),
+            ("posted",    cmd_posted),  ("logs",      cmd_logs),
+            ("keys",      cmd_keys),    ("platforms", cmd_platforms),
+            ("pause",     cmd_pause),   ("resume",    cmd_resume),
+            ("skip",      cmd_skip),    ("delete",    cmd_delete),
             ("config",    cmd_config),
         ]:
             tg_app.add_handler(CommandHandler(cmd, handler))
 
+        # Manual lifecycle — avoids run_polling() event loop conflicts
+        await tg_app.initialize()
+        await tg_app.start()
+        await tg_app.updater.start_polling(
+            drop_pending_updates=True,
+            allowed_updates=["message"],
+        )
         logger.info("Telegram bot polling started")
-        # run_polling handles initialize/start/idle/stop cleanly
-        await tg_app.run_polling(drop_pending_updates=True, close_loop=False)
+
+        # Keep running until the loop is stopped
+        await asyncio.Event().wait()
 
     try:
         loop.run_until_complete(_main())
     except Exception as e:
         logger.error(f"Telegram bot crashed: {e}")
     finally:
-        loop.close()
+        try:
+            loop.close()
+        except Exception:
+            pass

@@ -78,28 +78,53 @@ class Config(db.Model):
 
     # Mapping: DB key → environment variable name
     _ENV_MAP = {
-        'niche':                    'NICHE',
-        'cohere_api_key':           'COHERE_API_KEY',
-        'gemini_api_key':           'GEMINI_API_KEY',
-        'cloudinary_cloud_name':    'CLOUDINARY_CLOUD_NAME',
-        'cloudinary_api_key':       'CLOUDINARY_API_KEY',
-        'cloudinary_api_secret':    'CLOUDINARY_API_SECRET',
-        'fb_page_id':               'FB_PAGE_ID',
-        'fb_access_token':          'FB_ACCESS_TOKEN',
-        'ig_user_id':               'IG_USER_ID',
-        'ig_access_token':          'IG_ACCESS_TOKEN',
-        'twitter_api_key':          'TWITTER_API_KEY',
-        'twitter_api_secret':       'TWITTER_API_SECRET',
-        'twitter_access_token':     'TWITTER_ACCESS_TOKEN',
+        # ── App settings ──────────────────────────────────────────────────────
+        'niche':                       'NICHE',        'image_ratio_percent':         'IMAGE_RATIO_PERCENT',
+        'image_width':                 'IMAGE_WIDTH',
+        'image_height':                'IMAGE_HEIGHT',
+        'image_model':                 'IMAGE_MODEL',
+        'frame_url':                   'FRAME_URL',
+        'frame_opacity':               'FRAME_OPACITY',
+        'delay_min_seconds':           'DELAY_MIN_SECONDS',
+        'delay_max_seconds':           'DELAY_MAX_SECONDS',
+        'idea_factory_time':           'IDEA_FACTORY_TIME',
+        'sched_1':                     'SCHED_1',
+        'sched_2':                     'SCHED_2',
+        'sched_3':                     'SCHED_3',
+        'sched_4':                     'SCHED_4',
+
+        # ── AI Providers ──────────────────────────────────────────────────────
+        'cohere_api_key':              'COHERE_API_KEY',
+        'gemini_api_key':              'GEMINI_API_KEY',
+        'groq_api_key':                'GROQ_API_KEY',
+        'openrouter_api_key':          'OPENROUTER_API_KEY',
+        'openai_api_key':              'OPENAI_API_KEY',
+
+        # ── Image services ────────────────────────────────────────────────────
+        'cloudinary_cloud_name':       'CLOUDINARY_CLOUD_NAME',
+        'cloudinary_api_key':          'CLOUDINARY_API_KEY',
+        'cloudinary_api_secret':       'CLOUDINARY_API_SECRET',
+        'worker_url':                  'WORKER_URL',
+        'pollinations_key':            'POLLINATIONS_KEY',
+        'apyhub_token':                'APYHUB_TOKEN',
+
+        # ── Social platforms ──────────────────────────────────────────────────
+        'fb_page_id':                  'FB_PAGE_ID',
+        'fb_access_token':             'FB_ACCESS_TOKEN',
+        'ig_user_id':                  'IG_USER_ID',
+        'ig_access_token':             'IG_ACCESS_TOKEN',
+        'twitter_api_key':             'TWITTER_API_KEY',
+        'twitter_api_secret':          'TWITTER_API_SECRET',
+        'twitter_access_token':        'TWITTER_ACCESS_TOKEN',
         'twitter_access_token_secret': 'TWITTER_ACCESS_TOKEN_SECRET',
-        'threads_user_id':          'THREADS_USER_ID',
-        'threads_access_token':     'THREADS_ACCESS_TOKEN',
-        'li_person_id':             'LI_PERSON_ID',
-        'li_access_token':          'LI_ACCESS_TOKEN',
-        'worker_url':               'WORKER_URL',
-        'pollinations_key':         'POLLINATIONS_KEY',
-        'telegram_bot_token':       'TELEGRAM_BOT_TOKEN',
-        'telegram_admin_chat_id':   'TELEGRAM_ADMIN_CHAT_ID',
+        'threads_user_id':             'THREADS_USER_ID',
+        'threads_access_token':        'THREADS_ACCESS_TOKEN',
+        'li_person_id':                'LI_PERSON_ID',
+        'li_access_token':             'LI_ACCESS_TOKEN',
+
+        # ── Telegram ──────────────────────────────────────────────────────────
+        'telegram_bot_token':          'TELEGRAM_BOT_TOKEN',
+        'telegram_admin_chat_id':      'TELEGRAM_ADMIN_CHAT_ID',
     }
 
     @staticmethod
@@ -107,24 +132,35 @@ class Config(db.Model):
         """
         Priority:
         1. Environment variable (HuggingFace Secrets / .env)
-        2. Database value (set via dashboard)
-        3. default
+        2. Redis (Upstash — persistent across restarts)
+        3. Database value (set via dashboard)
+        4. default
         """
         import os
         from database.models import db
-        # Check env first
+        # 1. Check env first
         env_name = Config._ENV_MAP.get(key)
         if env_name:
             env_val = os.environ.get(env_name, '')
             if env_val:
                 return env_val
-        # Fallback to DB
+        # 2. Check Redis
+        try:
+            from services.redis_config import redis_get
+            redis_val = redis_get(key, '')
+            if redis_val:
+                return redis_val
+        except Exception:
+            pass
+        # 3. Fallback to DB
         row = db.session.get(Config, key)
         return row.value if row else default
 
     @staticmethod
     def set(key, value):
+        """Save to both DB and Redis."""
         from database.models import db
+        # Save to DB
         row = db.session.get(Config, key)
         if row:
             row.value = value
@@ -132,6 +168,12 @@ class Config(db.Model):
             row = Config(key=key, value=value)
             db.session.add(row)
         db.session.commit()
+        # Save to Redis
+        try:
+            from services.redis_config import redis_set
+            redis_set(key, value)
+        except Exception:
+            pass
 
 
 class ApiKey(db.Model):

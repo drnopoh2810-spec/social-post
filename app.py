@@ -4,6 +4,7 @@ from datetime import datetime
 from flask import Flask, jsonify
 from flask_login import LoginManager
 from flask_wtf.csrf import CSRFProtect
+from werkzeug.middleware.proxy_fix import ProxyFix
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -60,6 +61,10 @@ def create_app(config_name=None):
     app = Flask(__name__)
     app.config.from_object(config[config_name])
 
+    # Fix for reverse proxy (HuggingFace Spaces, Nginx, etc.)
+    # Tells Flask to trust X-Forwarded-For and X-Forwarded-Proto headers
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
     db.init_app(app)
     login_manager.init_app(app)
     csrf.init_app(app)
@@ -110,6 +115,16 @@ def create_app(config_name=None):
         _seed_admin(app)
         _seed_defaults()
         _seed_from_env()
+        # Restore config from Redis if DB was wiped (restart)
+        try:
+            from services.redis_config import sync_redis_to_db, sync_db_to_redis
+            restored = sync_redis_to_db()
+            if restored:
+                logger.info(f"Restored {restored} config values from Redis")
+            else:
+                sync_db_to_redis()  # First run — push DB → Redis
+        except Exception as e:
+            logger.warning(f"Redis sync skipped: {e}")
 
     _app_instance = app
     _setup_scheduler(app)
@@ -132,9 +147,14 @@ def _seed_admin(app):
 
 
 def _seed_from_env():
-    """Sync HuggingFace Secrets / env vars → DB on every startup."""
-    from database.models import Config as Cfg
+    """
+    Sync HuggingFace Secrets / env vars → DB on every startup.
+    Handles both Config keys and AIProviderKey entries.
+    """
+    from database.models import Config as Cfg, AIProviderKey
     synced = 0
+
+    # ── 1. Config key-value pairs ─────────────────────────────────────────────
     for db_key, env_name in Cfg._ENV_MAP.items():
         env_val = os.environ.get(env_name, '').strip()
         if not env_val:
@@ -146,6 +166,33 @@ def _seed_from_env():
         elif existing.value != env_val:
             existing.value = env_val
             synced += 1
+
+    # ── 2. AI Provider Keys (COHERE_KEY_1, COHERE_KEY_2, GEMINI_KEY_1 ...) ───
+    # Format: {PROVIDER}_KEY_{N} e.g. COHERE_KEY_1=sk-xxx
+    #         {PROVIDER}_KEY_{N}_LABEL=حساب شخصي  (optional label)
+    providers = ['COHERE', 'GEMINI', 'GROQ', 'OPENROUTER', 'OPENAI']
+    for provider_upper in providers:
+        provider = provider_upper.lower()
+        for n in range(1, 6):  # support up to 5 keys per provider
+            env_key = f'{provider_upper}_KEY_{n}'
+            key_val = os.environ.get(env_key, '').strip()
+            if not key_val:
+                continue
+            label = os.environ.get(f'{env_key}_LABEL', f'Key {n}').strip()
+            # Check if already exists (match by provider + key_value)
+            exists = AIProviderKey.query.filter_by(
+                provider=provider, key_value=key_val
+            ).first()
+            if not exists:
+                db.session.add(AIProviderKey(
+                    provider=provider,
+                    label=label,
+                    key_value=key_val,
+                    priority=n - 1,
+                    is_active=True,
+                ))
+                synced += 1
+
     if synced:
         db.session.commit()
         logger.info(f"Synced {synced} env vars → DB")

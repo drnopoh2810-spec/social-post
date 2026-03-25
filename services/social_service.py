@@ -1,11 +1,18 @@
 """
 Social media publishing service — Production-ready integrations.
 
-Facebook  : Graph API v20.0 — صورة + نص
-Instagram : Graph API v20.0 — صورة فقط (text-only غير مدعوم للـ feed)
-Twitter/X : Tweepy OAuth1 — صورة + نص
-Threads   : Threads API v1.0 — صورة + نص
-LinkedIn  : UGC Posts API — صورة + نص
+Facebook  : Graph API v20.0 — صورة + نص كامل
+Instagram : Graph API v20.0 — صورة + كابشن (2200 حرف) | text-only = skip
+Twitter/X : Tweepy OAuth1   — صورة + نص (270 حرف)
+Threads   : Threads API v1.0 — صورة + نص | نص فقط
+LinkedIn  : UGC Posts API   — صورة (article) + نص | نص فقط
+
+ملاحظة Instagram:
+  - يدعم فقط: IMAGE مع caption
+  - لا يدعم: text-only على الـ feed عبر API
+  - الـ caption يُقطع على 2200 حرف (حد Instagram)
+  - الصورة يجب أن تكون على URL عام (Cloudinary)
+  - يتطلب حساب Business أو Creator
 """
 import requests
 import time
@@ -15,6 +22,7 @@ import io
 logger = logging.getLogger(__name__)
 
 GRAPH_VER = "v20.0"
+IG_CAPTION_LIMIT = 2200   # حد Instagram الرسمي للكابشن
 
 
 # ─── Facebook ─────────────────────────────────────────────────────────────────
@@ -45,13 +53,30 @@ def post_facebook_text(page_id: str, access_token: str, message: str) -> str:
 
 def post_instagram_image(ig_user_id: str, access_token: str, image_url: str, caption: str) -> str:
     """
-    نشر صورة على Instagram Business/Creator.
-    يتطلب: صورة على URL عام (Cloudinary) + حساب Business.
+    نشر صورة + كابشن على Instagram Business/Creator.
+
+    المتطلبات:
+    - حساب Instagram Business أو Creator (مش Personal)
+    - الصورة على URL عام يمكن لـ Facebook servers الوصول إليه (Cloudinary ✅)
+    - الـ caption بحد أقصى 2200 حرف
+    - نسبة الصورة: 4:5 (1080×1350) أو 1:1 (1080×1080) أو 1.91:1
+
+    Flow:
+    1. إنشاء media container مع image_url + caption
+    2. انتظار processing (polling حتى FINISHED)
+    3. نشر الـ container
     """
+    # قطع الكابشن على الحد الرسمي
+    caption_trimmed = caption[:IG_CAPTION_LIMIT] if caption else ""
+
     # Step 1: Create media container
     r = requests.post(
         f"https://graph.facebook.com/{GRAPH_VER}/{ig_user_id}/media",
-        json={"image_url": image_url, "caption": caption, "access_token": access_token},
+        json={
+            "image_url": image_url,
+            "caption": caption_trimmed,
+            "access_token": access_token,
+        },
         timeout=30,
     )
     _raise_with_detail(r, "Instagram create container")
@@ -69,35 +94,50 @@ def post_instagram_image(ig_user_id: str, access_token: str, image_url: str, cap
         timeout=30,
     )
     _raise_with_detail(r2, "Instagram publish")
-    return r2.json().get("id", "")
+    post_id = r2.json().get("id", "")
+    logger.info(f"Instagram published: {post_id} | caption: {len(caption_trimmed)} chars")
+    return post_id
 
 
 def _wait_for_ig_container(ig_user_id: str, access_token: str, container_id: str,
                             max_wait: int = 60):
-    """Poll container status until FINISHED or timeout."""
-    for _ in range(max_wait // 5):
+    """
+    Poll container status_code حتى FINISHED أو timeout.
+    status_code values: IN_PROGRESS | FINISHED | ERROR | EXPIRED | PUBLISHED
+    """
+    for attempt in range(max_wait // 5):
         time.sleep(5)
         r = requests.get(
             f"https://graph.facebook.com/{GRAPH_VER}/{container_id}",
-            params={"fields": "status_code", "access_token": access_token},
+            params={"fields": "status_code,status", "access_token": access_token},
             timeout=15,
         )
         if r.ok:
-            status = r.json().get("status_code", "")
+            data = r.json()
+            status = data.get("status_code", "")
+            logger.debug(f"IG container {container_id} status: {status} (attempt {attempt+1})")
             if status == "FINISHED":
                 return
-            if status == "ERROR":
-                raise ValueError(f"Instagram container processing failed: {r.json()}")
-    # Fallback: just wait 8s if polling fails
-    time.sleep(8)
+            if status in ("ERROR", "EXPIRED"):
+                raise ValueError(
+                    f"Instagram container failed with status '{status}': {data.get('status', '')}"
+                )
+        # IN_PROGRESS → keep waiting
+    # Timeout fallback — try to publish anyway
+    logger.warning(f"IG container {container_id} polling timed out — attempting publish anyway")
 
 
 def post_instagram_text(ig_user_id: str, access_token: str, text: str) -> str:
     """
-    Instagram لا يدعم منشورات نصية على الـ feed.
-    نستخدم Reels text overlay أو نرجع empty string.
+    Instagram لا يدعم text-only posts على الـ feed عبر Content Publishing API.
+
+    البدائل المتاحة:
+    - استخدم Threads بدلاً منه للنص الطويل
+    - أو أنشئ صورة نصية (text-on-image) وانشرها كـ image post
+
+    الحل المطبق هنا: skip بدون error — المنشور يُنشر على باقي المنصات.
     """
-    logger.warning("Instagram text-only posts are not supported on feed. Skipping.")
+    logger.info("Instagram: text-only posts not supported via API — skipped (use image post instead)")
     return ""
 
 

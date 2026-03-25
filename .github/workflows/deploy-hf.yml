@@ -1,0 +1,49 @@
+name: Deploy to HuggingFace Spaces
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:   # manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    name: Push to HuggingFace Space
+    runs-on: ubuntu-latest
+    # Only run if HF_TOKEN secret is configured
+    if: ${{ secrets.HF_TOKEN != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Install git-lfs
+        run: git lfs install
+
+      - name: Push to HuggingFace Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ secrets.HF_SPACE }}   # format: username/space-name
+        run: |
+          git config --global user.email "ci@github.com"
+          git config --global user.name "GitHub Actions"
+
+          # Clone the HF Space repo
+          git clone https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE} hf_space
+
+          # Sync files (exclude secrets and git internals)
+          rsync -av --delete \
+            --exclude='.git' \
+            --exclude='.env' \
+            --exclude='*.db' \
+            --exclude='*.sqlite' \
+            --exclude='__pycache__' \
+            --exclude='.github' \
+            . hf_space/
+
+          cd hf_space
+          git add -A
+          git diff --staged --quiet || git commit -m "Deploy from GitHub: $(git -C .. rev-parse --short HEAD)"
+          git push
+          echo "✅ Deployed to HuggingFace Space: ${HF_SPACE}"

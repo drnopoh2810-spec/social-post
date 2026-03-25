@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}الإعدادات العامة{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">⚙️ الإعدادات العامة</div>
+  <div class="page-sub">تحكم كامل في إعدادات الـ CONFIG</div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-title">🎯 النيش والمحتوى</div>
+    <div class="form-group">
+      <label>CFG_niche — تخصص المحتوى</label>
+      <textarea id="cfg-niche" rows="5">{{ cfg.get('niche','') }}</textarea>
+    </div>
+    <div class="form-group">
+      <label>نسبة المنشورات مصورة % (CFG_image_ratio_percent)</label>
+      <input type="number" id="cfg-img-ratio" min="0" max="100" value="{{ cfg.get('image_ratio_percent','90') }}">
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">⏱ التوقيت والتأخير</div>
+    <div class="form-group">
+      <label>تأخير أدنى بالثواني (CFG_delay_min_seconds)</label>
+      <input type="number" id="cfg-delay-min" value="{{ cfg.get('delay_min_seconds','60') }}">
+    </div>
+    <div class="form-group">
+      <label>تأخير أقصى بالثواني (CFG_delay_max_seconds)</label>
+      <input type="number" id="cfg-delay-max" value="{{ cfg.get('delay_max_seconds','420') }}">
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">☁️ Cloudinary</div>
+  <div class="grid-3">
+    <div class="form-group"><label>Cloud Name</label><input type="text" id="cfg-cloud" value="{{ cfg.get('cloudinary_cloud_name','') }}"></div>
+    <div class="form-group"><label>API Key</label><input type="text" id="cfg-cloud-key" value="{{ cfg.get('cloudinary_api_key','') }}"></div>
+    <div class="form-group"><label>API Secret</label><input type="password" id="cfg-cloud-secret" value="{{ cfg.get('cloudinary_api_secret','') }}"></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">🖼️ إطار الصور</div>
+  <div class="form-group"><label>رابط الإطار (CFG_frame_url)</label><input type="url" id="cfg-frame" value="{{ cfg.get('frame_url','') }}"></div>
+</div>
+
+<div class="card">
+  <div class="card-title">🔧 Cloudflare Worker وPollinations</div>
+  <div class="grid-2">
+    <div class="form-group"><label>Worker URL</label><input type="url" id="cfg-worker" value="{{ cfg.get('worker_url','') }}"></div>
+    <div class="form-group"><label>Pollinations API Key</label><input type="password" id="cfg-poll" value="{{ cfg.get('pollinations_key','') }}"></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">🤖 مفاتيح الذكاء الاصطناعي</div>
+  <div class="grid-2">
+    <div class="form-group"><label>Cohere API Key</label><input type="password" id="cfg-cohere" value="{{ cfg.get('cohere_api_key','') }}"></div>
+    <div class="form-group"><label>Google Gemini API Key</label><input type="password" id="cfg-gemini" value="{{ cfg.get('gemini_api_key','') }}"></div>
+  </div>
+</div>
+
+<div class="btn-group">
+  <button class="btn btn-primary" onclick="saveConfig()">💾 حفظ الإعدادات</button>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function saveConfig(){
+  const data = {
+    niche: document.getElementById('cfg-niche').value,
+    image_ratio_percent: document.getElementById('cfg-img-ratio').value,
+    delay_min_seconds: document.getElementById('cfg-delay-min').value,
+    delay_max_seconds: document.getElementById('cfg-delay-max').value,
+    cloudinary_cloud_name: document.getElementById('cfg-cloud').value,
+    cloudinary_api_key: document.getElementById('cfg-cloud-key').value,
+    cloudinary_api_secret: document.getElementById('cfg-cloud-secret').value,
+    frame_url: document.getElementById('cfg-frame').value,
+    worker_url: document.getElementById('cfg-worker').value,
+    pollinations_key: document.getElementById('cfg-poll').value,
+    cohere_api_key: document.getElementById('cfg-cohere').value,
+    gemini_api_key: document.getElementById('cfg-gemini').value,
+  };
+  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
+    .then(r=>r.json()).then(d=>{ if(d.ok) toast('✅ تم حفظ الإعدادات','green'); });
+}
+</script>
+{% endblock %}

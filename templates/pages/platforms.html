@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}المنصات الاجتماعية{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">📱 المنصات الاجتماعية</div>
+  <div class="page-sub">تفعيل وتعطيل المنصات المستهدفة</div>
+</div>
+
+{% set icons = {'facebook':'📘','instagram':'📷','twitter':'𝕏','threads':'🔗','linkedin':'💼'} %}
+{% set labels = {'facebook':'Facebook','instagram':'Instagram','twitter':'Twitter/X','threads':'Threads','linkedin':'LinkedIn'} %}
+
+<div class="platform-grid">
+  {% for p in platforms %}
+  <div class="platform-card {{ 'enabled' if p.enabled else '' }}" id="card-{{ p.name }}" onclick="togglePlatform('{{ p.name }}')">
+    <div class="platform-icon">{{ icons.get(p.name,'📱') }}</div>
+    <div class="platform-name">{{ labels.get(p.name, p.name) }}</div>
+    <div id="status-{{ p.name }}" class="badge {{ 'badge-green' if p.enabled else 'badge-red' }}" style="margin:0 auto">
+      {{ '✅ مفعّل' if p.enabled else '❌ معطّل' }}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <div class="card-title">⚙️ إعدادات النشر لكل منصة</div>
+  {% for p in platforms %}
+  {% set s = p._settings_dict %}
+  <div style="padding:14px 0;border-bottom:1px solid var(--border)">
+    <div style="font-weight:700;margin-bottom:10px">{{ icons.get(p.name,'📱') }} {{ labels.get(p.name, p.name) }}</div>
+    {% if p.name == 'facebook' %}
+    <div class="form-group" style="max-width:300px">
+      <label>نوع النشر</label>
+      <select id="plat-fb-type">
+        <option value="image_and_text" {{ 'selected' if s.get('post_type') == 'image_and_text' }}>صورة ونص</option>
+        <option value="image_only" {{ 'selected' if s.get('post_type') == 'image_only' }}>صورة فقط</option>
+        <option value="text_only" {{ 'selected' if s.get('post_type') == 'text_only' }}>نص فقط</option>
+      </select>
+    </div>
+    {% elif p.name == 'instagram' %}
+    <div class="form-group" style="max-width:200px"><label>الحد الأقصى للكابشن</label><input type="number" id="plat-ig-cap" value="{{ s.get('max_caption', 2200) }}"></div>
+    {% elif p.name == 'twitter' %}
+    <div class="form-group" style="max-width:200px"><label>الحد الأقصى للأحرف</label><input type="number" id="plat-x-chars" value="{{ s.get('max_chars', 270) }}"></div>
+    {% elif p.name == 'threads' %}
+    <div class="form-group" style="max-width:200px"><label>الحد الأقصى للأحرف</label><input type="number" id="plat-th-chars" value="{{ s.get('max_chars', 500) }}"></div>
+    {% elif p.name == 'linkedin' %}
+    <div class="form-group" style="max-width:200px"><label>الحد الأقصى للأحرف</label><input type="number" id="plat-li-chars" value="{{ s.get('max_chars', 3000) }}"></div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<button class="btn btn-primary" onclick="savePlatforms()">💾 حفظ إعدادات المنصات</button>
+<button class="btn btn-secondary" style="margin-right:10px" onclick="testAllPlatforms()">🔌 اختبار الاتصال بالكل</button>
+<div id="test-results" style="margin-top:16px"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function togglePlatform(name){
+  fetch('/api/platforms/'+name+'/toggle',{method:'POST',headers:{'X-CSRFToken':getCsrf()}})
+    .then(r=>r.json()).then(d=>{
+      const card = document.getElementById('card-'+name);
+      const badge = document.getElementById('status-'+name);
+      if(d.enabled){ card.classList.add('enabled'); badge.className='badge badge-green'; badge.textContent='✅ مفعّل'; }
+      else{ card.classList.remove('enabled'); badge.className='badge badge-red'; badge.textContent='❌ معطّل'; }
+    });
+}
+
+function savePlatforms(){
+  const data = [
+    {name:'facebook', settings:{post_type:document.getElementById('plat-fb-type')?.value||'image_and_text'}},
+    {name:'instagram', settings:{max_caption:parseInt(document.getElementById('plat-ig-cap')?.value)||2200}},
+    {name:'twitter', settings:{max_chars:parseInt(document.getElementById('plat-x-chars')?.value)||270}},
+    {name:'threads', settings:{max_chars:parseInt(document.getElementById('plat-th-chars')?.value)||500}},
+    {name:'linkedin', settings:{max_chars:parseInt(document.getElementById('plat-li-chars')?.value)||3000}},
+  ];
+  fetch('/api/platforms',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
+    .then(r=>r.json()).then(d=>{ if(d.ok) toast('✅ تم حفظ إعدادات المنصات','green'); });
+}
+
+function testAllPlatforms(){
+  const platforms = ['facebook','instagram','twitter','threads','linkedin'];
+  const el = document.getElementById('test-results');
+  el.innerHTML = '<div style="color:var(--text3);font-size:13px">جاري الاختبار...</div>';
+  const results = {};
+  let done = 0;
+  platforms.forEach(p=>{
+    fetch('/api/platforms/test/'+p,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()}})
+      .then(r=>r.json()).then(d=>{
+        results[p] = d;
+        done++;
+        if(done === platforms.length) renderTestResults(results);
+      }).catch(e=>{ results[p]={ok:false,error:String(e)}; done++; if(done===platforms.length) renderTestResults(results); });
+  });
+}
+
+function renderTestResults(results){
+  const icons = {facebook:'📘',instagram:'📷',twitter:'𝕏',threads:'🔗',linkedin:'💼'};
+  const el = document.getElementById('test-results');
+  let html = '<div class="card" style="margin-top:0"><div class="card-title">🔌 نتائج اختبار الاتصال</div><div style="display:flex;flex-direction:column;gap:10px">';
+  Object.entries(results).forEach(([p,r])=>{
+    const icon = icons[p]||'📱';
+    if(r.ok){
+      const detail = r.name ? ` — ${r.name}` : r.username ? ` — @${r.username}` : '';
+      html += `<div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:14px">${icon} ${p.charAt(0).toUpperCase()+p.slice(1)}${detail}</span>
+        <span class="badge badge-green">✅ متصل</span></div>`;
+    } else {
+      html += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <span style="font-size:14px">${icon} ${p.charAt(0).toUpperCase()+p.slice(1)}</span>
+        <span class="badge badge-red" title="${r.error||''}">❌ ${(r.error||'خطأ').substring(0,60)}</span></div>`;
+    }
+  });
+  html += '</div></div>';
+  el.innerHTML = html;
+}
+</script>
+{% endblock %}

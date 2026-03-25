@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}نماذج الذكاء{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">🤖 نماذج الذكاء الاصطناعي</div>
+  <div class="page-sub">تحكم في أي نموذج يُستخدم لكل مرحلة</div>
+</div>
+
+<div class="info-box">
+  💡 <strong>المجاني المتاح:</strong> Cohere (command-r7b-arabic-02-2025 | command-r-08-2024 | command-r-plus-08-2024) • Google Gemini (gemini-1.5-flash | gemini-2.0-flash-exp) • Groq (llama-3.1-8b-instant)
+</div>
+
+{% set stage_labels = {
+  'idea_factory': '🧠 مصنع الأفكار',
+  'post_writer': '✍️ كاتب المنشورات',
+  'image_prompt': '🎨 كاتب برومبت الصور',
+  'ig_caption': '📷 كابشن Instagram',
+  'x_caption': '𝕏 كابشن Twitter/X',
+  'threads_caption': '🔗 كابشن Threads',
+  'linkedin_caption': '💼 كابشن LinkedIn'
+} %}
+
+{% set provider_models = {
+  'cohere': ['command-r7b-arabic-02-2025','command-r-08-2024','command-r-plus-08-2024'],
+  'gemini': ['gemini-1.5-flash','gemini-1.5-flash-8b','gemini-2.0-flash-exp'],
+  'groq': ['llama-3.1-8b-instant','llama-3.3-70b-versatile','mixtral-8x7b-32768'],
+  'openai': ['gpt-4o-mini','gpt-4o','gpt-3.5-turbo']
+} %}
+
+{% for m in models %}
+<div class="card" style="margin-bottom:14px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+    <div class="card-title" style="margin-bottom:0">{{ stage_labels.get(m.stage, m.stage) }}</div>
+    <span class="badge badge-purple">{{ m.model_id }}</span>
+  </div>
+  <div class="grid-2">
+    <div class="form-group" style="margin-bottom:0">
+      <label>المزود (Provider)</label>
+      <select id="provider-{{ m.stage }}" onchange="updateModelOptions('{{ m.stage }}')">
+        <option value="cohere" {{ 'selected' if m.provider == 'cohere' }}>🟡 Cohere (مجاني)</option>
+        <option value="gemini" {{ 'selected' if m.provider == 'gemini' }}>🔵 Google Gemini (مجاني)</option>
+        <option value="groq" {{ 'selected' if m.provider == 'groq' }}>🟢 Groq (مجاني سريع)</option>
+        <option value="openai" {{ 'selected' if m.provider == 'openai' }}>⚫ OpenAI (مدفوع)</option>
+      </select>
+    </div>
+    <div class="form-group" style="margin-bottom:0">
+      <label>النموذج</label>
+      <select id="model-{{ m.stage }}">
+        {% for mid in provider_models.get(m.provider, []) %}
+        <option value="{{ mid }}" {{ 'selected' if m.model_id == mid }}>{{ mid }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+<button class="btn btn-primary" onclick="saveModels()">💾 حفظ اختيارات النماذج</button>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const providerModels = {
+  cohere:['command-r7b-arabic-02-2025','command-r-08-2024','command-r-plus-08-2024'],
+  gemini:['gemini-1.5-flash','gemini-1.5-flash-8b','gemini-2.0-flash-exp'],
+  groq:['llama-3.1-8b-instant','llama-3.3-70b-versatile','mixtral-8x7b-32768'],
+  openai:['gpt-4o-mini','gpt-4o','gpt-3.5-turbo']
+};
+const stages = {{ models | map(attribute='stage') | list | tojson }};
+
+function updateModelOptions(stage){
+  const provider = document.getElementById('provider-'+stage).value;
+  const sel = document.getElementById('model-'+stage);
+  sel.innerHTML = (providerModels[provider]||[]).map(m=>`<option value="${m}">${m}</option>`).join('');
+}
+
+function saveModels(){
+  const data = stages.map(stage=>({
+    stage,
+    provider: document.getElementById('provider-'+stage)?.value,
+    model_id: document.getElementById('model-'+stage)?.value,
+  }));
+  fetch('/api/models',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
+    .then(r=>r.json()).then(d=>{ if(d.ok) toast('✅ تم حفظ النماذج','green'); });
+}
+</script>
+{% endblock %}

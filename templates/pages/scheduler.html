@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}جدول النشر{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">🕐 جدول النشر</div>
+  <div class="page-sub">تخصيص مواعيد النشر اليومية</div>
+</div>
+
+<div class="card">
+  <div class="card-title">📅 مواعيد مصنع الأفكار</div>
+  <div class="form-group">
+    <label>وقت التشغيل اليومي</label>
+    <input type="time" id="idea-time" value="{{ cfg.get('idea_factory_time','08:00') }}" style="max-width:200px">
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">📢 مواعيد النشر (4 مرات يومياً)</div>
+  <div class="grid-4">
+    <div class="form-group"><label>النشر الأول</label><input type="time" id="sched-1" value="{{ cfg.get('sched_1','09:00') }}"></div>
+    <div class="form-group"><label>النشر الثاني</label><input type="time" id="sched-2" value="{{ cfg.get('sched_2','13:00') }}"></div>
+    <div class="form-group"><label>النشر الثالث</label><input type="time" id="sched-3" value="{{ cfg.get('sched_3','17:00') }}"></div>
+    <div class="form-group"><label>النشر الرابع</label><input type="time" id="sched-4" value="{{ cfg.get('sched_4','21:00') }}"></div>
+  </div>
+</div>
+
+<button class="btn btn-primary" onclick="saveScheduler()">💾 حفظ الجدول</button>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function saveScheduler(){
+  const data = {
+    idea_factory_time: document.getElementById('idea-time').value,
+    sched_1: document.getElementById('sched-1').value,
+    sched_2: document.getElementById('sched-2').value,
+    sched_3: document.getElementById('sched-3').value,
+    sched_4: document.getElementById('sched-4').value,
+  };
+  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
+    .then(r=>r.json()).then(d=>{ if(d.ok) toast('✅ تم حفظ الجدول','green'); });
+}
+</script>
+{% endblock %}

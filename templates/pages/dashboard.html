@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}لوحة التحكم — بوست سوشال{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">لوحة التحكم الرئيسية</div>
+  <div class="page-sub">نظرة شاملة على أداء مشروع بوست سوشال</div>
+</div>
+
+<div class="grid-4" style="margin-bottom:20px">
+  <div class="stat-card purple">
+    <div class="stat-icon">💡</div>
+    <div class="stat-label">إجمالي الأفكار</div>
+    <div class="stat-value">{{ stats.total }}</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-icon">✅</div>
+    <div class="stat-label">تم نشره</div>
+    <div class="stat-value">{{ stats.posted }}</div>
+  </div>
+  <div class="stat-card orange">
+    <div class="stat-icon">⏳</div>
+    <div class="stat-label">في الانتظار</div>
+    <div class="stat-value">{{ stats.pending }}</div>
+  </div>
+  <div class="stat-card blue">
+    <div class="stat-icon">📅</div>
+    <div class="stat-label">تم اليوم</div>
+    <div class="stat-value">{{ stats.today }}</div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-title">⚡ النظام والوضع الحالي</div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="color:var(--text2);font-size:14px">مصنع الأفكار (8:00 ص)</span>
+        <span class="badge badge-green">✅ نشط</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="color:var(--text2);font-size:14px">محرك النشر (4× يومياً)</span>
+        <span class="badge badge-green">✅ نشط</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="color:var(--text2);font-size:14px">خط إنتاج الصور</span>
+        <span class="badge badge-green">✅ نشط</span>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <div class="btn-group">
+      <button class="btn btn-primary btn-sm" onclick="runIdeas()">🧠 توليد أفكار الآن</button>
+      <button class="btn btn-secondary btn-sm" onclick="runPost()">📢 نشر الآن</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">📱 حالة المنصات</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      {% set icons = {'facebook':'📘','instagram':'📷','twitter':'𝕏','threads':'🔗','linkedin':'💼'} %}
+      {% set names = {'facebook':'Facebook','instagram':'Instagram','twitter':'Twitter/X','threads':'Threads','linkedin':'LinkedIn'} %}
+      {% for p in platforms %}
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="color:var(--text2);font-size:14px">{{ icons.get(p.name,'📱') }} {{ names.get(p.name, p.name) }}</span>
+        <span class="badge {{ 'badge-green' if p.enabled else 'badge-red' }}">{{ '✅ مفعّل' if p.enabled else '❌ معطّل' }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">🕐 آخر 5 منشورات</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>الفكرة</th><th>النبرة</th><th>الأسلوب</th><th>النوع</th><th>الحالة</th><th>التاريخ</th></tr></thead>
+      <tbody>
+        {% if recent %}
+          {% for p in recent %}
+          <tr>
+            <td><code>{{ p.id }}</code></td>
+            <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ p.idea }}">{{ (p.idea or '')[:60] }}{% if (p.idea or '')|length > 60 %}...{% endif %}</td>
+            <td>{{ p.tone or '—' }}</td>
+            <td>{{ p.writing_style or '—' }}</td>
+            <td><span class="badge {{ 'badge-purple' if p.post_type == 'image' else 'badge-blue' }}">{{ '🖼️ صورة' if p.post_type == 'image' else '📝 نص' }}</span></td>
+            <td>{% include 'partials/status_badge.html' %}</td>
+            <td style="font-size:12px;color:var(--text3)">{{ p.created_at.strftime('%Y-%m-%d') if p.created_at else '—' }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="7"><div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">لا توجد منشورات بعد</div></div></td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">📋 سجل الأحداث</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>الحدث</th><th>الرسالة</th><th>المستوى</th><th>الوقت</th></tr></thead>
+      <tbody>
+        {% for log in logs %}
+        <tr>
+          <td><code>{{ log.event }}</code></td>
+          <td style="font-size:12px">{{ log.message }}</td>
+          <td><span class="badge {{ 'badge-green' if log.level == 'info' else 'badge-red' }}">{{ log.level }}</span></td>
+          <td style="font-size:12px;color:var(--text3)">{{ log.created_at.strftime('%Y-%m-%d %H:%M') if log.created_at else '' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" style="text-align:center;color:var(--text3);padding:20px">لا توجد أحداث بعد</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function runIdeas(){
+  toast('🧠 جاري توليد الأفكار...','purple');
+  fetch('/workflow/run-ideas',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()}})
+    .then(r=>r.json()).then(d=>{toast(d.message,'green');setTimeout(()=>location.reload(),3000)})
+    .catch(e=>toast('خطأ: '+e,'red'));
+}
+function runPost(){
+  toast('📢 جاري النشر...','purple');
+  fetch('/workflow/run-post',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()}})
+    .then(r=>r.json()).then(d=>{toast(d.message,'green');setTimeout(()=>location.reload(),5000)})
+    .catch(e=>toast('خطأ: '+e,'red'));
+}
+</script>
+{% endblock %}

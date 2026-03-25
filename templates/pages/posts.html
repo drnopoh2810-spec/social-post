@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}الأفكار والمنشورات{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">💡 الأفكار والمنشورات</div>
+  <div class="page-sub">إدارة كاملة لجميع أفكار وحالات المنشورات</div>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px">
+    <div class="tabs" style="margin-bottom:0">
+      {% for s, label in [('ALL','الكل'),('NEW','جديد'),('POSTED','منشور'),('SKIP','متخطى')] %}
+      <a class="tab {{ 'active' if current_status == s else '' }}" href="{{ url_for('dashboard.posts', status=s, q=q) }}">{{ label }}</a>
+      {% endfor %}
+    </div>
+    <div style="display:flex;gap:10px">
+      <form method="GET" action="{{ url_for('dashboard.posts') }}" style="display:flex;gap:8px">
+        <input type="hidden" name="status" value="{{ current_status }}">
+        <input type="text" name="q" value="{{ q }}" placeholder="🔍 بحث في الأفكار..." style="width:220px">
+        <button type="submit" class="btn btn-secondary btn-sm">بحث</button>
+      </form>
+      <button class="btn btn-primary btn-sm" onclick="showAddModal()">+ إضافة فكرة</button>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>#</th><th>الفكرة</th><th>الكلمات المفتاحية</th><th>النبرة</th><th>الأسلوب</th><th>النوع</th><th>الحالة</th><th>التاريخ</th><th>إجراء</th></tr>
+      </thead>
+      <tbody>
+        {% if posts %}
+          {% for p in posts %}
+          <tr>
+            <td><code>{{ p.id }}</code></td>
+            <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ p.idea }}">{{ (p.idea or '')[:50] }}{% if (p.idea or '')|length > 50 %}...{% endif %}</td>
+            <td style="font-size:12px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ (p.keywords or '')[:40] }}</td>
+            <td style="font-size:12px">{{ p.tone or '—' }}</td>
+            <td style="font-size:12px">{{ p.writing_style or '—' }}</td>
+            <td><span class="badge {{ 'badge-purple' if p.post_type == 'image' else 'badge-blue' }}">{{ '🖼️' if p.post_type == 'image' else '📝' }}</span></td>
+            <td>{% include 'partials/status_badge.html' %}</td>
+            <td style="font-size:12px;color:var(--text3)">{{ p.created_at.strftime('%Y-%m-%d') if p.created_at else '—' }}</td>
+            <td>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-secondary btn-sm" onclick="editPost({{ p.id }}, '{{ p.status }}')">✏️</button>
+                <button class="btn btn-danger btn-sm" onclick="deletePost({{ p.id }})">🗑️</button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="9"><div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">لا توجد منشورات</div></div></td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Add Idea Modal -->
+<div id="add-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;align-items:center;justify-content:center;backdrop-filter:blur(4px)" onclick="closeModal()">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:28px;width:600px;max-width:90vw" onclick="event.stopPropagation()">
+    <div style="font-size:18px;font-weight:900;margin-bottom:20px">➕ إضافة فكرة جديدة</div>
+    <div class="form-group">
+      <label>الفكرة</label>
+      <textarea id="new-idea" placeholder="اكتب الفكرة هنا..." rows="3"></textarea>
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label>الكلمات المفتاحية</label>
+        <input type="text" id="new-keywords" placeholder="كلمة1، كلمة2">
+      </div>
+      <div class="form-group">
+        <label>النبرة العاطفية</label>
+        <select id="new-tone">
+          <option>تصحيح خرافة</option><option>قصة حالة</option><option>بحث وإحصاء</option><option>نصيحة عملية</option><option>سؤال للنقاش</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label>أسلوب الكتابة</label>
+        <select id="new-style">
+          <option>مراقب ميداني</option><option>محلل علمي</option><option>محاور هادئ</option><option>ناقد لطيف</option><option>راوي تجربة</option><option>مقارن دقيق</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>نوع الافتتاحية</label>
+        <select id="new-opening">
+          <option>مشهد ميداني</option><option>سؤال صامت</option><option>ملاحظة مضادة للحدس</option><option>إحصاء مفاجئ</option><option>ذاكرة مهنية</option><option>مقارنة مباشرة</option>
+        </select>
+      </div>
+    </div>
+    <div class="btn-group" style="justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeModal()">إلغاء</button>
+      <button class="btn btn-primary" onclick="addIdea()">حفظ الفكرة</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function showAddModal(){ document.getElementById('add-modal').style.display='flex'; }
+function closeModal(){ document.getElementById('add-modal').style.display='none'; }
+
+function addIdea(){
+  const idea = document.getElementById('new-idea').value.trim();
+  if(!idea){ toast('الفكرة مطلوبة','red'); return; }
+  fetch('/api/posts',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body:JSON.stringify({
+      idea, keywords:document.getElementById('new-keywords').value,
+      tone:document.getElementById('new-tone').value,
+      writing_style:document.getElementById('new-style').value,
+      opening_type:document.getElementById('new-opening').value
+    })
+  }).then(r=>r.json()).then(d=>{ if(d.ok){ toast('✅ تمت إضافة الفكرة','green'); setTimeout(()=>location.reload(),1000); } });
+}
+
+function deletePost(id){
+  if(!confirm('حذف هذا المنشور؟')) return;
+  fetch('/api/posts/'+id,{method:'DELETE',headers:{'X-CSRFToken':getCsrf()}})
+    .then(r=>r.json()).then(d=>{ if(d.ok){ toast('🗑️ تم الحذف','orange'); setTimeout(()=>location.reload(),800); } });
+}
+
+function editPost(id, currentStatus){
+  const newStatus = prompt('تغيير الحالة (NEW / POSTED / SKIP / ERROR):', currentStatus);
+  if(newStatus && ['NEW','POSTED','SKIP','ERROR'].includes(newStatus)){
+    fetch('/api/posts/'+id,{
+      method:'PATCH',
+      headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+      body:JSON.stringify({status:newStatus})
+    }).then(r=>r.json()).then(d=>{ if(d.ok){ toast('✅ تم التحديث','green'); setTimeout(()=>location.reload(),800); } });
+  }
+}
+</script>
+{% endblock %}

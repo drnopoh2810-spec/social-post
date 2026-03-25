@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}محرر البرومبتات{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">✍️ محرر البرومبتات</div>
+  <div class="page-sub">تخصيص كامل لبرومبت كل وكيل ذكاء اصطناعي</div>
+</div>
+
+<div class="warning-box">⚠️ تعديل البرومبتات يؤثر مباشرة على جودة المحتوى المنتج. تأكد من الاختبار بعد أي تغيير.</div>
+
+{% set stage_labels = {
+  'idea_factory': '🧠 مصنع الأفكار',
+  'post_writer': '✍️ كاتب المنشورات',
+  'image_prompt': '🎨 كاتب برومبت الصور',
+  'ig_caption': '📷 كابشن Instagram',
+  'x_caption': '𝕏 كابشن Twitter/X',
+  'threads_caption': '🔗 كابشن Threads',
+  'linkedin_caption': '💼 كابشن LinkedIn'
+} %}
+
+{% for p in prompts %}
+<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:14px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:10px;font-size:15px;font-weight:700">
+      {{ stage_labels.get(p.stage, p.stage) }}
+      <code>{{ p.model }}</code>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:12px;color:var(--text3)">Temperature:</span>
+      <input type="number" id="temp-{{ p.stage }}" value="{{ p.temperature }}" min="0" max="2" step="0.05" style="width:70px;padding:4px 8px;font-size:12px">
+      <span style="font-size:12px;color:var(--text3)">Max Tokens:</span>
+      <input type="number" id="tokens-{{ p.stage }}" value="{{ p.max_tokens }}" min="256" max="8192" step="256" style="width:90px;padding:4px 8px;font-size:12px">
+    </div>
+  </div>
+  <div class="form-group" style="margin-bottom:12px">
+    <label>System Prompt</label>
+    <textarea id="sys-{{ p.stage }}" rows="3">{{ p.system_prompt or '' }}</textarea>
+  </div>
+  <div class="form-group" style="margin-bottom:0">
+    <label>User Prompt (متغيرات: {niche} {idea} {keywords} {tone} {post_content} ...)</label>
+    <textarea id="user-{{ p.stage }}" rows="8">{{ p.user_prompt or '' }}</textarea>
+  </div>
+</div>
+{% endfor %}
+
+<button class="btn btn-primary" onclick="savePrompts()">💾 حفظ جميع البرومبتات</button>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const stages = {{ prompts | map(attribute='stage') | list | tojson }};
+
+function savePrompts(){
+  const data = stages.map(stage=>({
+    stage,
+    system_prompt: document.getElementById('sys-'+stage)?.value,
+    user_prompt: document.getElementById('user-'+stage)?.value,
+    temperature: parseFloat(document.getElementById('temp-'+stage)?.value)||0.8,
+    max_tokens: parseInt(document.getElementById('tokens-'+stage)?.value)||2048,
+  }));
+  fetch('/api/prompts',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
+    .then(r=>r.json()).then(d=>{ if(d.ok) toast('✅ تم حفظ البرومبتات','green'); });
+}
+</script>
+{% endblock %}

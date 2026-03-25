@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}بوت تيليجرام{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">✈️ بوت تيليجرام</div>
+  <div class="page-sub">تحكم كامل في المشروع من تيليجرام — إشعارات فورية + أوامر مباشرة</div>
+</div>
+
+<div class="info-box">
+  💡 <strong>خطوات الإعداد:</strong>
+  1. افتح <a href="https://t.me/BotFather" target="_blank" style="color:var(--accent2)">@BotFather</a> في تيليجرام
+  2. أرسل <code>/newbot</code> واتبع التعليمات
+  3. انسخ الـ Token وضعه هنا
+  4. افتح <a href="https://t.me/userinfobot" target="_blank" style="color:var(--accent2)">@userinfobot</a> عشان تعرف الـ Chat ID بتاعك
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-title">🔧 إعدادات البوت</div>
+    <div class="form-group">
+      <label>Bot Token</label>
+      <input type="password" id="bot-token" value="{{ cfg.get('telegram_bot_token','') }}" placeholder="123456789:AAF...">
+    </div>
+    <div class="form-group">
+      <label>Admin Chat ID (الـ ID الخاص بك)</label>
+      <input type="text" id="admin-chat-id" value="{{ cfg.get('telegram_admin_chat_id','') }}" placeholder="123456789">
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-primary" onclick="saveTelegramConfig()">💾 حفظ الإعدادات</button>
+      <button class="btn btn-secondary" onclick="testTelegram()">📨 اختبار الإرسال</button>
+    </div>
+    <div id="tg-test-result" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">📋 الأوامر المتاحة</div>
+    <div style="display:flex;flex-direction:column;gap:8px;font-size:13px">
+      {% for cmd, desc in [
+        ('/start', 'رسالة ترحيب + قائمة الأوامر'),
+        ('/status', 'حالة النظام والإحصائيات'),
+        ('/ideas', 'توليد أفكار جديدة الآن'),
+        ('/post', 'نشر منشور الآن'),
+        ('/pending', 'عرض الأفكار المنتظرة'),
+        ('/posted', 'آخر 5 منشورات منشورة'),
+        ('/logs', 'آخر 10 أحداث في السجل'),
+        ('/keys', 'حالة مفاتيح الـ AI'),
+        ('/platforms', 'حالة المنصات'),
+        ('/pause', 'إيقاف الجدولة مؤقتاً'),
+        ('/resume', 'استئناف الجدولة'),
+        ('/skip <id>', 'تخطي فكرة معينة'),
+        ('/delete <id>', 'حذف فكرة معينة'),
+        ('/config', 'عرض الإعدادات الرئيسية'),
+      ] %}
+      <div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)">
+        <code style="min-width:130px">{{ cmd }}</code>
+        <span style="color:var(--text2)">{{ desc }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">🔔 الإشعارات التلقائية</div>
+  <div style="display:flex;flex-direction:column;gap:12px">
+    {% for event, desc in [
+      ('✅ نشر ناجح', 'عند نشر منشور على المنصات'),
+      ('🧠 أفكار جديدة', 'عند توليد أفكار من مصنع الأفكار'),
+      ('🔑 مفاتيح منتهية', 'عند انتهاء حصة مفتاح AI'),
+      ('❌ خطأ في النشر', 'عند فشل النشر على أي منصة'),
+    ] %}
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:14px;color:var(--text2)">{{ event }}</span>
+      <span class="badge badge-green">✅ مفعّل</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function saveTelegramConfig(){
+  const data = {
+    bot_token: document.getElementById('bot-token').value,
+    admin_chat_id: document.getElementById('admin-chat-id').value,
+  };
+  fetch('/api/telegram/config',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body:JSON.stringify(data)
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok) toast('✅ تم حفظ إعدادات البوت','green');
+  });
+}
+
+function testTelegram(){
+  const el = document.getElementById('tg-test-result');
+  el.innerHTML = '<span style="color:var(--text3)">جاري الإرسال...</span>';
+  fetch('/api/telegram/test',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()}
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      el.innerHTML = '<span class="badge badge-green">✅ تم الإرسال — تحقق من تيليجرام</span>';
+    } else {
+      el.innerHTML = `<span class="badge badge-red">❌ فشل: ${d.error||'خطأ غير معروف'}</span>`;
+    }
+  });
+}
+</script>
+{% endblock %}

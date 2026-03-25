@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}التحليلات{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">📈 التحليلات والأداء</div>
+  <div class="page-sub">تحليل أداء المنشورات والتعلم من النجاحات</div>
+</div>
+
+<div class="grid-3" style="margin-bottom:20px">
+  <div class="stat-card purple"><div class="stat-label">متوسط Engagement Score</div><div class="stat-value">{{ avg or '—' }}</div></div>
+  <div class="stat-card green"><div class="stat-label">أفضل نبرة</div><div class="stat-value" style="font-size:16px;margin-top:4px">{{ best_tone }}</div></div>
+  <div class="stat-card blue"><div class="stat-label">أفضل أسلوب</div><div class="stat-value" style="font-size:16px;margin-top:4px">{{ best_style }}</div></div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-title">🏆 أفضل 5 منشورات أداءً</div>
+    {% if top5 %}
+      {% for p in top5 %}
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:18px;font-weight:900;color:var(--accent2)">#{{ loop.index }}</span>
+        <div style="flex:1">
+          <div style="font-size:13px;color:var(--text);margin-bottom:3px">{{ (p.idea or '')[:60] }}...</div>
+          <div style="font-size:11px;color:var(--text3)">{{ p.tone or '' }} | {{ p.writing_style or '' }}</div>
+        </div>
+        <span class="badge badge-green">{{ p.engagement_score }}</span>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state"><div class="empty-icon">📊</div><div class="empty-title">لا توجد بيانات بعد</div></div>
+    {% endif %}
+  </div>
+  <div class="card">
+    <div class="card-title">📉 أضعف 5 منشورات</div>
+    {% if bottom5 %}
+      {% for p in bottom5 %}
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:18px;font-weight:900;color:var(--red)">#{{ loop.index }}</span>
+        <div style="flex:1">
+          <div style="font-size:13px;color:var(--text);margin-bottom:3px">{{ (p.idea or '')[:60] }}...</div>
+          <div style="font-size:11px;color:var(--text3)">{{ p.tone or '' }}</div>
+        </div>
+        <span class="badge badge-red">{{ p.engagement_score }}</span>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state"><div class="empty-icon">📊</div><div class="empty-title">لا توجد بيانات بعد</div></div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">📊 تسجيل بيانات Engagement</div>
+  <div class="info-box">💡 أدخل بيانات أداء المنشورات من Facebook Insights لتحليلها وتحسين الأفكار القادمة</div>
+  <div class="grid-2">
+    <div class="form-group">
+      <label>اختر المنشور</label>
+      <select id="eng-post">
+        {% for p in all_posted %}
+        <option value="{{ p.id }}">{{ p.id }} — {{ (p.idea or '')[:50] }}</option>
+        {% else %}
+        <option>لا توجد منشورات منشورة</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Engagement Score (0-100)</label>
+      <input type="number" id="eng-score" min="0" max="100" placeholder="75">
+    </div>
+  </div>
+  <div class="grid-3">
+    <div class="form-group"><label>Likes</label><input type="number" id="eng-likes" placeholder="0"></div>
+    <div class="form-group"><label>Comments</label><input type="number" id="eng-comments" placeholder="0"></div>
+    <div class="form-group"><label>Shares</label><input type="number" id="eng-shares" placeholder="0"></div>
+  </div>
+  <button class="btn btn-primary" onclick="saveEngagement()">💾 حفظ بيانات الأداء</button>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function saveEngagement(){
+  const postId = document.getElementById('eng-post').value;
+  if(!postId || isNaN(postId)){ toast('اختر منشوراً','red'); return; }
+  fetch('/api/engagement',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body:JSON.stringify({
+      post_id:parseInt(postId),
+      score:parseInt(document.getElementById('eng-score').value)||0,
+      likes:parseInt(document.getElementById('eng-likes').value)||0,
+      comments:parseInt(document.getElementById('eng-comments').value)||0,
+      shares:parseInt(document.getElementById('eng-shares').value)||0,
+    })
+  }).then(r=>r.json()).then(d=>{ if(d.ok){ toast('✅ تم حفظ بيانات الأداء','green'); setTimeout(()=>location.reload(),1000); } });
+}
+</script>
+{% endblock %}

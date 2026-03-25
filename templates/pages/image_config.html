@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}إعدادات الصور{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">🎨 إعدادات الصور</div>
+  <div class="page-sub">تحكم في توليد الصور والأبعاد</div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-title">📐 أبعاد الصورة</div>
+    <div class="grid-2">
+      <div class="form-group"><label>العرض (px)</label><input type="number" id="img-width" value="{{ cfg.get('image_width','1080') }}"></div>
+      <div class="form-group"><label>الارتفاع (px)</label><input type="number" id="img-height" value="{{ cfg.get('image_height','1350') }}"></div>
+    </div>
+    <div class="form-group">
+      <label>نموذج توليد الصور</label>
+      <select id="img-model">
+        <option value="flux" {{ 'selected' if cfg.get('image_model') == 'flux' }}>Flux 2 (Cloudflare Worker)</option>
+        <option value="pollinations" {{ 'selected' if cfg.get('image_model') == 'pollinations' }}>Pollinations (احتياطي)</option>
+      </select>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">🖼️ إعدادات الإطار</div>
+    <div class="form-group"><label>رابط الإطار</label><input type="url" id="frame-url" value="{{ cfg.get('frame_url','') }}"></div>
+    <div class="form-group">
+      <label>نسبة الشفافية %</label>
+      <input type="range" id="frame-opacity" min="0" max="100" value="{{ cfg.get('frame_opacity','100') }}" oninput="document.getElementById('opacity-val').textContent=this.value+'%'">
+      <span id="opacity-val" style="font-size:13px;color:var(--text2)">{{ cfg.get('frame_opacity','100') }}%</span>
+    </div>
+  </div>
+</div>
+
+<button class="btn btn-primary" onclick="saveImageConfig()">💾 حفظ إعدادات الصور</button>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function saveImageConfig(){
+  const data = {
+    image_width: document.getElementById('img-width').value,
+    image_height: document.getElementById('img-height').value,
+    image_model: document.getElementById('img-model').value,
+    frame_url: document.getElementById('frame-url').value,
+    frame_opacity: document.getElementById('frame-opacity').value,
+  };
+  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
+    .then(r=>r.json()).then(d=>{ if(d.ok) toast('✅ تم حفظ إعدادات الصور','green'); });
+}
+</script>
+{% endblock %}

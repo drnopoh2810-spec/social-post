@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}مدير API Keys{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">🔑 مدير الـ API Keys</div>
+  <div class="page-sub">إدارة مفاتيح API لكل منصة — يمكن إضافة عدة مفاتيح والتبديل بينها</div>
+</div>
+
+{% for platform, keys, label, icon in [
+  ('facebook', fb_keys, 'Facebook & Instagram', '📘'),
+  ('twitter', x_keys, 'Twitter / X', '𝕏'),
+  ('threads', th_keys, 'Threads', '🔗'),
+  ('linkedin', li_keys, 'LinkedIn', '💼')
+] %}
+<div class="card">
+  <div class="card-title">{{ icon }} {{ label }}</div>
+  <div id="{{ platform }}-keys">
+    {% if keys %}
+      {% for k in keys %}
+      <div style="background:var(--bg3);border:1px solid {{ 'var(--accent)' if k.is_active else 'var(--border)' }};border-radius:var(--radius2);padding:14px;margin-bottom:10px;display:flex;align-items:center;gap:12px">
+        <div style="flex:1">
+          <div style="font-weight:700;margin-bottom:4px">{{ k.label or 'مفتاح ' + k.id|string }}</div>
+          <div style="font-size:12px;color:var(--text3)">{{ '🟢 نشط' if k.is_active else '⚪ غير نشط' }}</div>
+        </div>
+        <input type="password" value="{{ k.key_value }}" style="flex:1;max-width:300px;font-family:'JetBrains Mono',monospace;font-size:12px" onchange="updateKey({{ k.id }}, this.value)">
+        <div style="display:flex;gap:6px">
+          {% if not k.is_active %}
+          <button class="btn btn-success btn-sm" onclick="activateKey({{ k.id }})">تفعيل</button>
+          {% else %}
+          <span class="badge badge-green">نشط</span>
+          {% endif %}
+          <button class="btn btn-danger btn-sm" onclick="deleteKey({{ k.id }})">🗑️</button>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div style="font-size:13px;color:var(--text3);padding:10px 0">لا توجد مفاتيح محفوظة</div>
+    {% endif %}
+  </div>
+  <button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="addKey('{{ platform }}')">+ إضافة مفتاح جديد</button>
+  <div class="sep"></div>
+  {% if platform == 'facebook' %}
+  <div class="grid-2">
+    <div class="form-group"><label>Facebook Page ID</label><input type="text" id="cfg-fb-page" value="{{ cfg.get('fb_page_id','') }}"></div>
+    <div class="form-group"><label>Instagram User ID</label><input type="text" id="cfg-ig-uid" value="{{ cfg.get('ig_user_id','') }}"></div>
+  </div>
+  <div class="form-group"><label>Facebook Access Token</label><input type="password" id="cfg-fb-token" value="{{ cfg.get('fb_access_token','') }}"></div>
+  <div class="form-group"><label>Instagram Access Token</label><input type="password" id="cfg-ig-token" value="{{ cfg.get('ig_access_token','') }}"></div>
+  {% elif platform == 'twitter' %}
+  <div class="grid-2">
+    <div class="form-group"><label>Twitter API Key</label><input type="password" id="cfg-tw-key" value="{{ cfg.get('twitter_api_key','') }}"></div>
+    <div class="form-group"><label>Twitter API Secret</label><input type="password" id="cfg-tw-secret" value="{{ cfg.get('twitter_api_secret','') }}"></div>
+  </div>
+  <div class="grid-2">
+    <div class="form-group"><label>Access Token</label><input type="password" id="cfg-tw-token" value="{{ cfg.get('twitter_access_token','') }}"></div>
+    <div class="form-group"><label>Access Token Secret</label><input type="password" id="cfg-tw-token-secret" value="{{ cfg.get('twitter_access_token_secret','') }}"></div>
+  </div>
+  {% elif platform == 'threads' %}
+  <div class="grid-2">
+    <div class="form-group"><label>Threads User ID</label><input type="text" id="cfg-th-uid" value="{{ cfg.get('threads_user_id','') }}"></div>
+    <div class="form-group"><label>Threads Access Token</label><input type="password" id="cfg-th-token" value="{{ cfg.get('threads_access_token','') }}"></div>
+  </div>
+  {% elif platform == 'linkedin' %}
+  <div class="grid-2">
+    <div class="form-group"><label>LinkedIn Person ID</label><input type="text" id="cfg-li-pid" value="{{ cfg.get('li_person_id','') }}"></div>
+    <div class="form-group"><label>LinkedIn Access Token</label><input type="password" id="cfg-li-token" value="{{ cfg.get('li_access_token','') }}"></div>
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+
+<button class="btn btn-primary" onclick="saveAllKeys()">💾 حفظ جميع المفاتيح</button>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function addKey(platform){
+  const label = prompt('اسم/تسمية هذا المفتاح:');
+  if(!label) return;
+  const key = prompt('أدخل الـ API Key:');
+  if(!key) return;
+  fetch('/api/api-keys',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify({platform,label,key_value:key})})
+    .then(r=>r.json()).then(d=>{ if(d.ok){ toast('✅ تمت الإضافة','green'); setTimeout(()=>location.reload(),800); } });
+}
+function activateKey(id){
+  fetch('/api/api-keys/'+id+'/activate',{method:'POST',headers:{'X-CSRFToken':getCsrf()}})
+    .then(r=>r.json()).then(d=>{ if(d.ok){ toast('✅ تم التفعيل','green'); setTimeout(()=>location.reload(),800); } });
+}
+function deleteKey(id){
+  if(!confirm('حذف هذا المفتاح؟')) return;
+  fetch('/api/api-keys/'+id,{method:'DELETE',headers:{'X-CSRFToken':getCsrf()}})
+    .then(r=>r.json()).then(d=>{ if(d.ok){ toast('🗑️ تم الحذف','orange'); setTimeout(()=>location.reload(),800); } });
+}
+function updateKey(id, value){
+  fetch('/api/api-keys/'+id,{method:'PATCH',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify({key_value:value})});
+}
+function saveAllKeys(){
+  const fields = [
+    ['cfg-fb-page','fb_page_id'],['cfg-ig-uid','ig_user_id'],
+    ['cfg-fb-token','fb_access_token'],['cfg-ig-token','ig_access_token'],
+    ['cfg-tw-key','twitter_api_key'],['cfg-tw-secret','twitter_api_secret'],
+    ['cfg-tw-token','twitter_access_token'],['cfg-tw-token-secret','twitter_access_token_secret'],
+    ['cfg-th-uid','threads_user_id'],['cfg-th-token','threads_access_token'],
+    ['cfg-li-pid','li_person_id'],['cfg-li-token','li_access_token'],
+  ];
+  const data = {};
+  fields.forEach(([elId, key])=>{ const el=document.getElementById(elId); if(el) data[key]=el.value; });
+  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
+    .then(r=>r.json()).then(d=>{ if(d.ok) toast('✅ تم حفظ جميع المفاتيح','green'); });
+}
+</script>
+{% endblock %}

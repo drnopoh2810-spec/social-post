@@ -1,0 +1,35 @@
+[Unit]
+Description=بوست سوشال — Social Post Manager
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/social_post
+EnvironmentFile=/opt/social_post/.env
+
+# Auto-restart on crash
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Gunicorn with config file
+ExecStart=/opt/social_post/venv/bin/gunicorn wsgi:application -c gunicorn.conf.py
+ExecReload=/bin/kill -s HUP $MAINPID
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=social_post
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/social_post
+
+[Install]
+WantedBy=multi-user.target

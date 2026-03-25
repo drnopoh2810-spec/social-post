@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}مفاتيح الـ AI{% endblock %}
+
+{% block extra_css %}
+<style>
+.key-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius2);padding:14px;margin-bottom:10px;display:flex;align-items:center;gap:12px;transition:border-color .2s}
+.key-card.exhausted{border-color:var(--red);background:rgba(239,68,68,.05)}
+.key-card.disabled{opacity:.5}
+.key-card.ok{border-color:var(--green)}
+.provider-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.provider-stats{display:flex;gap:8px;align-items:center}
+.key-priority{width:60px;padding:4px 8px;font-size:12px;text-align:center}
+.key-label-input{width:140px;padding:6px 10px;font-size:13px}
+.key-value-input{flex:1;font-family:'JetBrains Mono',monospace;font-size:12px;padding:6px 10px}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">🗝️ مفاتيح الذكاء الاصطناعي</div>
+  <div class="page-sub">إدارة عدة مفاتيح لكل مزود — التحويل التلقائي عند انتهاء الحصة</div>
+</div>
+
+<div class="info-box">
+  💡 <strong>كيف يعمل الـ Rotation:</strong>
+  النظام يجرب المفاتيح بالترتيب (Priority أصغر = أول). لو مفتاح وصل لـ Rate Limit أو انتهت حصته → يتحول تلقائياً للمفتاح الجاي.
+  بعد {{ 24 }} ساعة يتم إعادة تفعيل المفاتيح المنتهية تلقائياً.
+</div>
+
+<!-- Status Overview -->
+<div class="grid-4" style="margin-bottom:24px" id="status-grid">
+  {% set provider_labels = {'cohere':'Cohere','gemini':'Gemini','groq':'Groq','openrouter':'OpenRouter','openai':'OpenAI'} %}
+  {% set provider_icons = {'cohere':'🟡','gemini':'🔵','groq':'🟢','openrouter':'🟣','openai':'⚫'} %}
+  {% for p in providers[:4] %}
+  <div class="stat-card {{ 'green' if keys_by_provider[p]|selectattr('is_active')|selectattr('is_exhausted', 'equalto', False)|list|length > 0 else 'orange' }}" id="stat-{{ p }}">
+    <div class="stat-label">{{ provider_icons.get(p,'') }} {{ provider_labels.get(p,p) }}</div>
+    <div class="stat-value" style="font-size:22px">
+      {{ keys_by_provider[p]|selectattr('is_active')|selectattr('is_exhausted','equalto',False)|list|length }}
+      <span style="font-size:13px;color:var(--text3)">/ {{ keys_by_provider[p]|length }}</span>
+    </div>
+    <div style="font-size:11px;color:var(--text3)">مفاتيح متاحة</div>
+  </div>
+  {% endfor %}
+</div>
+
+{% for provider in providers %}
+{% set keys = keys_by_provider[provider] %}
+<div class="card" id="section-{{ provider }}">
+  <div class="provider-header">
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="font-size:20px">{{ provider_icons.get(provider,'🔑') }}</span>
+      <div>
+        <div style="font-weight:700;font-size:16px">{{ provider_labels.get(provider, provider) }}</div>
+        <div style="font-size:12px;color:var(--text3)" id="summary-{{ provider }}">
+          {% set avail = keys|selectattr('is_active')|selectattr('is_exhausted','equalto',False)|list|length %}
+          {% set exh = keys|selectattr('is_exhausted')|list|length %}
+          <span class="{{ 'badge-green' if avail > 0 else 'badge-red' }}" style="color:{{ 'var(--green)' if avail > 0 else 'var(--red)' }}">
+            {{ avail }} متاح
+          </span>
+          {% if exh %} · <span style="color:var(--orange)">{{ exh }} منتهي</span>{% endif %}
+          · {{ keys|length }} إجمالي
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-secondary btn-sm" onclick="resetAll('{{ provider }}')">🔄 إعادة تفعيل الكل</button>
+      <button class="btn btn-primary btn-sm" onclick="showAddForm('{{ provider }}')">+ إضافة مفتاح</button>
+    </div>
+  </div>
+
+  <!-- Add form (hidden by default) -->
+  <div id="add-form-{{ provider }}" style="display:none;background:var(--card2);border:1px solid var(--border);border-radius:var(--radius2);padding:16px;margin-bottom:14px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div class="form-group" style="margin-bottom:0;flex:0 0 140px">
+        <label style="font-size:11px">الاسم / التسمية</label>
+        <input type="text" id="new-label-{{ provider }}" placeholder="حساب شخصي" class="key-label-input">
+      </div>
+      <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+        <label style="font-size:11px">API Key</label>
+        <input type="password" id="new-key-{{ provider }}" placeholder="sk-..." class="key-value-input">
+      </div>
+      <div class="form-group" style="margin-bottom:0;flex:0 0 80px">
+        <label style="font-size:11px">Priority</label>
+        <input type="number" id="new-priority-{{ provider }}" value="0" min="0" class="key-priority">
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="addKey('{{ provider }}')">حفظ</button>
+      <button class="btn btn-secondary btn-sm" onclick="hideAddForm('{{ provider }}')">إلغاء</button>
+    </div>
+  </div>
+
+  <!-- Keys list -->
+  <div id="keys-list-{{ provider }}">
+    {% if keys %}
+      {% for k in keys %}
+      <div class="key-card {{ 'exhausted' if k.is_exhausted else ('disabled' if not k.is_active else 'ok') }}" id="key-{{ k.id }}">
+        <!-- Priority badge -->
+        <div style="text-align:center;min-width:40px">
+          <div style="font-size:10px;color:var(--text3)">أولوية</div>
+          <div style="font-weight:900;font-size:16px;color:var(--accent2)">{{ k.priority }}</div>
+        </div>
+
+        <!-- Status icon -->
+        <div style="font-size:20px;min-width:28px">
+          {% if k.is_exhausted %}🔴
+          {% elif not k.is_active %}⚫
+          {% else %}🟢{% endif %}
+        </div>
+
+        <!-- Label + key -->
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <input type="text" value="{{ k.label or '' }}" placeholder="التسمية"
+                   style="width:140px;padding:4px 8px;font-size:12px"
+                   onchange="updateKey({{ k.id }}, {label: this.value})">
+            <input type="password" value="{{ k.key_value }}" placeholder="API Key"
+                   style="flex:1;font-family:'JetBrains Mono',monospace;font-size:11px;padding:4px 8px"
+                   onchange="updateKey({{ k.id }}, {key_value: this.value})">
+            <input type="number" value="{{ k.priority }}" min="0" title="Priority (أصغر = أول)"
+                   style="width:60px;padding:4px 8px;font-size:12px;text-align:center"
+                   onchange="updateKey({{ k.id }}, {priority: parseInt(this.value)})">
+          </div>
+          {% if k.last_error %}
+          <div style="font-size:11px;color:var(--red);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:500px" title="{{ k.last_error }}">
+            ⚠️ {{ k.last_error[:100] }}
+          </div>
+          {% endif %}
+          {% if k.last_used_at %}
+          <div style="font-size:10px;color:var(--text3)">آخر استخدام: {{ k.last_used_at }}</div>
+          {% endif %}
+          {% if k.exhausted_at %}
+          <div style="font-size:10px;color:var(--orange)">انتهى في: {{ k.exhausted_at }} · يُعاد تلقائياً بعد 24 ساعة</div>
+          {% endif %}
+        </div>
+
+        <!-- Actions -->
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          {% if k.is_exhausted %}
+          <button class="btn btn-success btn-sm" onclick="resetKey({{ k.id }})">🔄 إعادة تفعيل</button>
+          {% endif %}
+          <button class="btn btn-secondary btn-sm" onclick="toggleKey({{ k.id }}, {{ 'false' if k.is_active else 'true' }})">
+            {{ '⏸️ تعطيل' if k.is_active else '▶️ تفعيل' }}
+          </button>
+          <button class="btn btn-danger btn-sm" onclick="deleteKey({{ k.id }}, '{{ provider }}')">🗑️</button>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div style="text-align:center;padding:20px;color:var(--text3);font-size:13px">
+        لا توجد مفاتيح — أضف مفتاحاً للبدء
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function showAddForm(p){ document.getElementById('add-form-'+p).style.display='block'; }
+function hideAddForm(p){ document.getElementById('add-form-'+p).style.display='none'; }
+
+function addKey(provider){
+  const label = document.getElementById('new-label-'+provider).value.trim();
+  const key_value = document.getElementById('new-key-'+provider).value.trim();
+  const priority = parseInt(document.getElementById('new-priority-'+provider).value)||0;
+  if(!key_value){ toast('أدخل الـ API Key','red'); return; }
+  fetch('/api/ai-keys',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body:JSON.stringify({provider, label, key_value, priority})
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok){ toast('✅ تمت الإضافة','green'); setTimeout(()=>location.reload(),800); }
+  });
+}
+
+function updateKey(id, data){
+  fetch('/api/ai-keys/'+id,{
+    method:'PATCH',
+    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body:JSON.stringify(data)
+  }).then(r=>r.json()).then(d=>{ if(d.ok) toast('✅ تم التحديث','green'); });
+}
+
+function toggleKey(id, activate){
+  fetch('/api/ai-keys/'+id,{
+    method:'PATCH',
+    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body:JSON.stringify({is_active: activate === 'true' || activate === true})
+  }).then(r=>r.json()).then(d=>{ if(d.ok){ toast('✅ تم','green'); setTimeout(()=>location.reload(),600); } });
+}
+
+function resetKey(id){
+  fetch('/api/ai-keys/'+id+'/reset',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()}
+  }).then(r=>r.json()).then(d=>{ if(d.ok){ toast('✅ تم إعادة التفعيل','green'); setTimeout(()=>location.reload(),600); } });
+}
+
+function resetAll(provider){
+  fetch('/api/ai-keys/reset-all',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body:JSON.stringify({provider})
+  }).then(r=>r.json()).then(d=>{ if(d.ok){ toast('✅ تم إعادة تفعيل الكل','green'); setTimeout(()=>location.reload(),600); } });
+}
+
+function deleteKey(id, provider){
+  if(!confirm('حذف هذا المفتاح؟')) return;
+  fetch('/api/ai-keys/'+id,{
+    method:'DELETE',
+    headers:{'X-CSRFToken':getCsrf()}
+  }).then(r=>r.json()).then(d=>{ if(d.ok){ toast('🗑️ تم الحذف','orange'); setTimeout(()=>location.reload(),600); } });
+}
+
+// Live status refresh every 30s
+setInterval(()=>{
+  fetch('/api/ai-keys/status').then(r=>r.json()).then(data=>{
+    Object.entries(data).forEach(([p, s])=>{
+      const el = document.getElementById('stat-'+p);
+      if(el){
+        const val = el.querySelector('.stat-value');
+        if(val) val.innerHTML = `${s.available} <span style="font-size:13px;color:var(--text3)">/ ${s.total}</span>`;
+      }
+    });
+  });
+}, 30000);
+</script>
+{% endblock %}

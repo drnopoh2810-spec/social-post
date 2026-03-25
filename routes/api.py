@@ -1,5 +1,5 @@
 """REST API endpoints — called via AJAX from the dashboard."""
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
 from flask_login import login_required
 from database.models import db, Post, Config, ApiKey, Prompt, Platform, AIModel
 from datetime import datetime
@@ -377,3 +377,152 @@ def run_query():
             return jsonify({'ok': True, 'message': 'Query executed successfully'})
     except Exception as e:
         return jsonify({'error': str(e)}), 400
+
+
+# ── Backup & Restore ──────────────────────────────────────────────────────────
+
+@api_bp.route('/backup/export', methods=['GET'])
+@login_required
+def export_backup():
+    """تصدير نسخة احتياطية كاملة بصيغة JSON."""
+    from database.models import AIProviderKey, AIModel, Prompt, Platform, WorkflowLog
+
+    # Config
+    config_data = {r.key: r.value for r in Config.query.all()}
+
+    # API Keys (social platforms)
+    api_keys = [k.to_dict() for k in ApiKey.query.all()]
+
+    # AI Provider Keys
+    ai_keys = [k.to_dict() for k in AIProviderKey.query.all()]
+
+    # AI Models
+    ai_models = [m.to_dict() for m in AIModel.query.all()]
+
+    # Prompts
+    prompts = [p.to_dict() for p in Prompt.query.all()]
+
+    # Platforms
+    platforms = [p.to_dict() for p in Platform.query.all()]
+
+    # Posts (بدون post_content لتقليل الحجم — اختياري)
+    include_posts = request.args.get('include_posts', 'false') == 'true'
+    posts_data = []
+    if include_posts:
+        posts_data = [p.to_dict() for p in Post.query.all()]
+
+    backup = {
+        'version': '1.0',
+        'created_at': datetime.utcnow().isoformat(),
+        'config': config_data,
+        'api_keys': api_keys,
+        'ai_provider_keys': ai_keys,
+        'ai_models': ai_models,
+        'prompts': prompts,
+        'platforms': platforms,
+        'posts': posts_data,
+        'stats': {
+            'total_posts': Post.query.count(),
+            'posted': Post.query.filter_by(status='POSTED').count(),
+            'pending': Post.query.filter_by(status='NEW').count(),
+        }
+    }
+
+    filename = f"backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+    return Response(
+        json.dumps(backup, ensure_ascii=False, indent=2),
+        mimetype='application/json',
+        headers={'Content-Disposition': f'attachment; filename={filename}'}
+    )
+
+
+@api_bp.route('/backup/import', methods=['POST'])
+@login_required
+def import_backup():
+    """استيراد نسخة احتياطية من ملف JSON."""
+    from database.models import AIProviderKey, AIModel, Prompt, Platform
+
+    if 'file' not in request.files:
+        return jsonify({'error': 'لم يتم رفع ملف'}), 400
+
+    f = request.files['file']
+    try:
+        data = json.loads(f.read().decode('utf-8'))
+    except Exception as e:
+        return jsonify({'error': f'ملف غير صالح: {e}'}), 400
+
+    restored = {'config': 0, 'api_keys': 0, 'ai_keys': 0, 'prompts': 0, 'platforms': 0}
+
+    # Config
+    for key, value in data.get('config', {}).items():
+        Config.set(key, value)
+        restored['config'] += 1
+
+    # API Keys
+    for k in data.get('api_keys', []):
+        if not ApiKey.query.filter_by(platform=k['platform'], label=k.get('label','')).first():
+            db.session.add(ApiKey(
+                platform=k['platform'], label=k.get('label',''),
+                key_value=k.get('key_value',''), is_active=k.get('is_active', False)
+            ))
+            restored['api_keys'] += 1
+
+    # AI Provider Keys
+    for k in data.get('ai_provider_keys', []):
+        if not AIProviderKey.query.filter_by(
+            provider=k['provider'], key_value=k.get('key_value','')
+        ).first():
+            db.session.add(AIProviderKey(
+                provider=k['provider'], label=k.get('label',''),
+                key_value=k.get('key_value',''), priority=k.get('priority', 0),
+                is_active=k.get('is_active', True)
+            ))
+            restored['ai_keys'] += 1
+
+    # Prompts
+    for p in data.get('prompts', []):
+        row = db.session.get(Prompt, p['stage'])
+        if row:
+            row.system_prompt = p.get('system_prompt', row.system_prompt)
+            row.user_prompt   = p.get('user_prompt', row.user_prompt)
+            row.model         = p.get('model', row.model)
+            row.temperature   = p.get('temperature', row.temperature)
+            row.max_tokens    = p.get('max_tokens', row.max_tokens)
+        else:
+            db.session.add(Prompt(**{k: v for k, v in p.items() if k in
+                ['stage','system_prompt','user_prompt','model','temperature','max_tokens']}))
+        restored['prompts'] += 1
+
+    # Platforms
+    for p in data.get('platforms', []):
+        row = db.session.get(Platform, p['name'])
+        if row:
+            row.enabled  = p.get('enabled', row.enabled)
+            row.settings = json.dumps(p.get('settings', {}))
+            restored['platforms'] += 1
+
+    db.session.commit()
+
+    # Sync to Redis if available
+    try:
+        from services.redis_config import sync_db_to_redis
+        sync_db_to_redis()
+    except Exception:
+        pass
+
+    return jsonify({'ok': True, 'restored': restored})
+
+
+@api_bp.route('/backup/push-redis', methods=['POST'])
+@login_required
+def push_to_redis():
+    """دفع كل الإعدادات الحالية إلى Redis يدوياً."""
+    try:
+        from services.redis_config import sync_db_to_redis, get_redis
+        r = get_redis()
+        if not r:
+            return jsonify({'ok': False, 'error': 'REDIS_URL غير مضبوط'})
+        sync_db_to_redis()
+        return jsonify({'ok': True, 'message': 'تم حفظ الإعدادات في Redis ✅'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]})

@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}نسخ احتياطي{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">💾 النسخ الاحتياطي والاستعادة</div>
+  <div class="page-sub">تصدير واستيراد كامل للإعدادات والمفاتيح والبيانات</div>
+</div>
+
+<!-- Export -->
+<div class="card">
+  <div class="card-title">📤 تصدير نسخة احتياطية</div>
+  <div class="info-box">
+    💡 يصدّر ملف JSON يحتوي على: جميع الإعدادات، مفاتيح API، مفاتيح AI، البرومبتات، إعدادات المنصات.
+  </div>
+  <div class="btn-group">
+    <a class="btn btn-primary" href="/api/backup/export" download>
+      ⬇️ تحميل النسخة الاحتياطية
+    </a>
+    <a class="btn btn-secondary" href="/api/backup/export?include_posts=true" download>
+      ⬇️ تحميل مع المنشورات
+    </a>
+  </div>
+</div>
+
+<!-- Import -->
+<div class="card">
+  <div class="card-title">📥 استيراد نسخة احتياطية</div>
+  <div class="warning-box">
+    ⚠️ الاستيراد سيضيف البيانات الجديدة ويحدّث الموجودة. لن يحذف أي بيانات حالية.
+  </div>
+  <div class="form-group">
+    <label>اختر ملف النسخة الاحتياطية (.json)</label>
+    <input type="file" id="backup-file" accept=".json" style="padding:8px">
+  </div>
+  <button class="btn btn-primary" onclick="importBackup()">📥 استيراد</button>
+  <div id="import-result" style="margin-top:14px"></div>
+</div>
+
+<!-- Redis Sync -->
+<div class="card">
+  <div class="card-title">☁️ مزامنة مع Redis (Upstash)</div>
+  <div class="info-box">
+    💡 يحفظ كل الإعدادات الحالية في Redis — تُستعاد تلقائياً عند أي restart أو نقل للسيرفر.
+  </div>
+  <div class="btn-group">
+    <button class="btn btn-primary" onclick="pushToRedis()">🔄 حفظ في Redis الآن</button>
+  </div>
+  <div id="redis-result" style="margin-top:14px"></div>
+</div>
+
+<!-- What's included -->
+<div class="card">
+  <div class="card-title">📋 محتوى النسخة الاحتياطية</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    {% for item, icon in [
+      ('جميع الإعدادات (Config)', '⚙️'),
+      ('مفاتيح API للمنصات', '🔑'),
+      ('مفاتيح AI (Cohere/Gemini/إلخ)', '🤖'),
+      ('البرومبتات المخصصة', '✍️'),
+      ('إعدادات المنصات', '📱'),
+      ('المنشورات (اختياري)', '📝'),
+    ] %}
+    <div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg3);border-radius:8px">
+      <span style="font-size:20px">{{ icon }}</span>
+      <span style="font-size:13px;color:var(--text2)">{{ item }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function importBackup(){
+  const file = document.getElementById('backup-file').files[0];
+  if(!file){ toast('اختر ملفاً أولاً','red'); return; }
+  const form = new FormData();
+  form.append('file', file);
+  document.getElementById('import-result').innerHTML = '<div style="color:var(--text3)">جاري الاستيراد...</div>';
+  fetch('/api/backup/import',{
+    method:'POST',
+    headers:{'X-CSRFToken':getCsrf()},
+    body: form
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      const r = d.restored;
+      document.getElementById('import-result').innerHTML =
+        `<div class="info-box" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:#6ee7b7">
+          ✅ تم الاستيراد بنجاح!<br>
+          ⚙️ إعدادات: ${r.config} | 🔑 مفاتيح API: ${r.api_keys} | 🤖 مفاتيح AI: ${r.ai_keys} | ✍️ برومبتات: ${r.prompts} | 📱 منصات: ${r.platforms}
+        </div>`;
+      toast('✅ تم الاستيراد بنجاح','green');
+    } else {
+      document.getElementById('import-result').innerHTML =
+        `<div class="warning-box">❌ ${d.error}</div>`;
+    }
+  }).catch(e=>{
+    document.getElementById('import-result').innerHTML =
+      `<div class="warning-box">❌ خطأ: ${e}</div>`;
+  });
+}
+
+function pushToRedis(){
+  document.getElementById('redis-result').innerHTML = '<div style="color:var(--text3)">جاري الحفظ...</div>';
+  fetch('/api/backup/push-redis',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()}
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      document.getElementById('redis-result').innerHTML =
+        `<div class="info-box" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:#6ee7b7">✅ ${d.message}</div>`;
+      toast('✅ تم الحفظ في Redis','green');
+    } else {
+      document.getElementById('redis-result').innerHTML =
+        `<div class="warning-box">❌ ${d.error}</div>`;
+    }
+  });
+}
+</script>
+{% endblock %}

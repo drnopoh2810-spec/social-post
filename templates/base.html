@@ -160,6 +160,9 @@ code,.mono{font-family:'JetBrains Mono',monospace;font-size:12px;background:var(
       <a class="nav-item {% if request.endpoint == 'dashboard.db_page' %}active{% endif %}" href="{{ url_for('dashboard.db_page') }}">
         <span class="nav-icon">🗄️</span> قاعدة البيانات
       </a>
+      <a class="nav-item {% if request.endpoint == 'dashboard.backup_page' %}active{% endif %}" href="{{ url_for('dashboard.backup_page') }}">
+        <span class="nav-icon">💾</span> نسخ احتياطي
+      </a>
     </div>
   </aside>
 

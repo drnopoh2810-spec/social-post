@@ -154,3 +154,9 @@ def ai_keys_page():
 @login_required
 def db_page():
     return render_template('pages/db.html')
+
+
+@dashboard_bp.route('/backup')
+@login_required
+def backup_page():
+    return render_template('pages/backup.html')

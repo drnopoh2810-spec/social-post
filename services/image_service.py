@@ -9,7 +9,7 @@ Flow (first success wins):
   5.  🔷  Stability AI SD 3.5    (مدفوع — مرن)
   6.  🤗  HuggingFace Flux       (مجاني بمفتاح)
   7.  🔗  Together AI Flux Free  (مجاني بمفتاح)
-  8.  ⚡  Fal.ai Flux Schnell    (مجاني محدود)
+  8.  ⚡  Fal.ai FLUX.1 Schnell  (رخيص $0.003/صورة)
   9.  🛩️  api.airforce           (مجاني بدون مفتاح)
   10. 🌸  Pollinations auth      (مجاني بـ token)
   11. 🌸  Pollinations anon      (last fallback — دايماً يشتغل)
@@ -74,11 +74,13 @@ def generate_image_cloudflare(worker_url, prompt, width=1080, height=1350):
 
 # ── Provider 2: Google Imagen 4 / Gemini Image ────────────────────────────────
 # مجاني بنفس مفتاح Gemini — يدعم النص العربي
+# Updated: Using stable 3.0 models instead of experimental 4.0
 
 GEMINI_IMAGE_MODELS = [
-    "imagen-4.0-generate-001",
-    "imagen-4.0-fast-generate-001",
-    "gemini-2.0-flash-exp",
+    "gemini-1.5-flash",           # Stable and available
+    "gemini-1.5-pro",             # Stable
+    "imagen-3.0-generate-001",    # Stable (changed from 4.0)
+    "imagen-3.0-fast-generate-001",
 ]
 
 _ASPECT_MAP = {
@@ -296,13 +298,22 @@ def generate_image_huggingface(api_key: str, prompt: str,
                                 width=1080, height=1350,
                                 model: str = HF_MODELS[0]) -> bytes:
     """HuggingFace Inference API — free tier."""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "num_inference_steps": 40,
+            "guidance_scale": 7.5
+        }
+    }
+    
     r = requests.post(
         f"https://api-inference.huggingface.co/models/{model}",
-        headers={"Authorization": f"Bearer {api_key}"},
-        json={"inputs": prompt, "parameters": {
-            "width": min(width, 1024), "height": min(height, 1024),
-            "num_inference_steps": 4, "guidance_scale": 0.0,
-        }},
+        headers=headers,
+        json=payload,
         timeout=120,
     )
     if r.status_code == 503:
@@ -310,11 +321,8 @@ def generate_image_huggingface(api_key: str, prompt: str,
         time.sleep(20)
         r = requests.post(
             f"https://api-inference.huggingface.co/models/{model}",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={"inputs": prompt, "parameters": {
-                "width": min(width, 1024), "height": min(height, 1024),
-                "num_inference_steps": 4, "guidance_scale": 0.0,
-            }},
+            headers=headers,
+            json=payload,
             timeout=120,
         )
     r.raise_for_status()
@@ -341,27 +349,51 @@ def _try_huggingface(prompt: str, width: int, height: int) -> bytes | None:
 
 def generate_image_together(api_key: str, prompt: str,
                              width=1024, height=1024) -> bytes:
-    """Together AI — Flux.1 Schnell Free."""
+    """
+    Together AI image generation.
+    Endpoint: POST https://api.together.xyz/v1/images/generations
+    Free models: FLUX.1-schnell-Free, FLUX.1-schnell
+    """
     import base64
-    r = requests.post(
-        "https://api.together.xyz/v1/images/generations",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={
-            "model": "black-forest-labs/FLUX.1-schnell-Free",
-            "prompt": prompt,
-            "width": min(width, 1440), "height": min(height, 1440),
-            "steps": 4, "n": 1, "response_format": "b64_json",
-        },
-        timeout=120,
-    )
-    r.raise_for_status()
-    data = r.json()["data"][0]
-    if data.get("b64_json"):
-        return base64.b64decode(data["b64_json"])
-    img_url = data.get("url", "")
-    if img_url:
-        return requests.get(img_url, timeout=60).content
-    raise ValueError("Together AI: no image in response")
+
+    # Try free models in order
+    models = [
+        "black-forest-labs/FLUX.1-schnell-Free",
+        "black-forest-labs/FLUX.1-schnell",
+        "black-forest-labs/FLUX.1-dev",
+    ]
+
+    last_err = None
+    for model in models:
+        try:
+            r = requests.post(
+                "https://api.together.xyz/v1/images/generations",
+                headers={"Authorization": f"Bearer {api_key}",
+                         "Content-Type": "application/json"},
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "width": min(width, 1440),
+                    "height": min(height, 1440),
+                    "steps": 4,
+                    "n": 1,
+                    "response_format": "b64_json",
+                },
+                timeout=120,
+            )
+            r.raise_for_status()
+            data = r.json()["data"][0]
+            if data.get("b64_json"):
+                return base64.b64decode(data["b64_json"])
+            img_url = data.get("url", "")
+            if img_url:
+                return requests.get(img_url, timeout=60).content
+        except Exception as e:
+            last_err = e
+            logger.warning(f"Together AI {model} failed: {e}")
+            continue
+
+    raise ValueError(f"Together AI: all models failed. Last: {last_err}")
 
 
 def _try_together(prompt: str, width: int, height: int) -> bytes | None:
@@ -381,15 +413,34 @@ def _try_together(prompt: str, width: int, height: int) -> bytes | None:
 
 def generate_image_fal(api_key: str, prompt: str,
                         width=1024, height=1360) -> bytes:
-    """Fal.ai — Flux Schnell. Free tier available."""
+    """Fal.ai — FLUX.1 Schnell (fastest, cheapest at $0.003/image)."""
+    # Calculate image_size preset or custom dimensions
+    ratio = width / height
+    if 0.9 <= ratio <= 1.1:
+        image_size = "square_hd"  # 1:1
+    elif ratio > 1.7:
+        image_size = "landscape_16_9"
+    elif ratio > 1.2:
+        image_size = "landscape_4_3"
+    elif ratio < 0.6:
+        image_size = "portrait_16_9"
+    elif ratio < 0.85:
+        image_size = "portrait_4_3"
+    else:
+        # Custom size
+        image_size = {"width": min(width, 1440), "height": min(height, 1440)}
+    
     r = requests.post(
         "https://fal.run/fal-ai/flux/schnell",
         headers={"Authorization": f"Key {api_key}", "Content-Type": "application/json"},
         json={
             "prompt": prompt,
-            "image_size": {"width": min(width, 1440), "height": min(height, 1440)},
-            "num_inference_steps": 4, "num_images": 1,
+            "image_size": image_size,
+            "num_inference_steps": 4,
+            "num_images": 1,
+            "guidance_scale": 3.5,
             "enable_safety_checker": False,
+            "output_format": "png",
         },
         timeout=120,
     )
@@ -415,70 +466,87 @@ def _try_fal(prompt: str, width: int, height: int) -> bytes | None:
 
 # ── Provider 9: api.airforce ─────────────────────────────────────────────────
 # OpenAI-compatible API — يدعم chat + image generation
-# مجاني بمفتاح (بعض النماذج مجانية price=0)
-# الـ endpoint: https://api.airforce/v1/
+# Image models المتاحة (من /v1/models — supports_images=true):
 
-# نماذج الصور المتاحة (supports_images=true)
-AIRFORCE_IMAGE_MODELS = [
-    "flux",           # الأصلي عبر /imagine2
-    "dirtberry",      # degraded لكن مجاني
-    "special-berry",  # degraded لكن مجاني
-    "z-image",        # degraded
-]
-
-# نماذج الـ chat المجانية (pricepermilliontokens=0, operational)
-AIRFORCE_FREE_CHAT_MODELS = [
-    "gemma3-270m:free",    # Google — سريع جداً
-    "moirai-agent",        # Salesforce — مجاني
-    "translategemma-27b",  # Google — مجاني
-    "teuken-7b",           # OpenGPT-X — مجاني
-]
-
-# نماذج الـ chat الـ operational (مدفوعة لكن بأسعار منخفضة)
-AIRFORCE_CHAT_MODELS = [
-    "deepseek-v3-0324",    # DeepSeek — operational
-    "deepseek-r1",         # DeepSeek — operational
-    "gemini-2.5-flash",    # Google — operational
-    "claude-sonnet-4.6",   # Anthropic — operational
-    "gpt-5-nano",          # OpenAI — operational
-    "gemma3-270m:free",    # مجاني
+# نماذج الصور الأكثر استقراراً (بالترتيب)
+AIRFORCE_IMAGE_MODELS_ORDERED = [
+    "flux-2-klein-4b",   # partial_outage — أرخص وأسرع ($0.03/img)
+    "flux-2-klein-9b",   # degraded — جودة أعلى ($0.05/img)
+    "flux-2-dev",        # degraded — جودة عالية ($0.10/img)
+    "special-berry",     # degraded — مجاني ($0)
+    "dirtberry",         # degraded — مجاني ($0)
+    "z-image",           # degraded ($0.10/img)
+    "flux",              # /imagine2 legacy — بدون مفتاح
 ]
 
 
 def generate_image_airforce(prompt: str, width=1024, height=1024,
-                             model: str = "flux",
+                             model: str = "flux-2-klein-4b",
                              api_key: str = "") -> bytes:
     """
-    api.airforce image generation.
-    - /imagine2 endpoint: بدون مفتاح (Flux)
-    - /v1/images/generations: بـ Bearer token (OpenAI-compatible)
+    api.airforce image generation via SSE streaming.
+    Endpoint: POST /v1/images/generations  (SSE only — sse=true required)
+    Legacy:   GET  /imagine2               (no key needed)
     """
-    if api_key and model not in ("flux",):
-        # OpenAI-compatible images endpoint
-        r = requests.post(
+    import json as _json
+
+    if api_key and model != "flux":
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "n": 1,
+            "size": f"{min(width, 1024)}x{min(height, 1024)}",
+            "response_format": "url",
+            "sse": True,   # required — API only supports SSE
+        }
+        with requests.post(
             "https://api.airforce/v1/images/generations",
-            headers={"Authorization": f"Bearer {api_key}",
-                     "Content-Type": "application/json"},
-            json={
-                "model": model,
-                "prompt": prompt,
-                "n": 1,
-                "size": f"{min(width, 1024)}x{min(height, 1024)}",
-            },
-            timeout=60,
-        )
-        r.raise_for_status()
-        data = r.json()
-        img_url = data.get("data", [{}])[0].get("url", "")
-        if img_url:
-            return requests.get(img_url, timeout=60).content
-        import base64
-        b64 = data.get("data", [{}])[0].get("b64_json", "")
-        if b64:
-            return base64.b64decode(b64)
-        raise ValueError(f"airforce image: no image in response: {str(data)[:200]}")
+            headers=headers, json=payload, stream=True, timeout=90,
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                line_str = line.decode("utf-8") if isinstance(line, bytes) else line
+                if line_str in ("data: [DONE]", "data: : keepalive", "data: "):
+                    continue
+                if line_str.startswith("data: "):
+                    try:
+                        chunk = _json.loads(line_str[6:])
+                        img_url = (
+                            chunk.get("url") or
+                            (chunk.get("data") or [{}])[0].get("url", "")
+                        )
+                        if img_url:
+                            # Skip anondrop.net URLs (blocked on PythonAnywhere)
+                            if "anondrop.net" in img_url:
+                                logger.warning(f"Skipping anondrop.net URL (blocked): {img_url}")
+                                continue
+                            
+                            try:
+                                img_r = requests.get(img_url, timeout=30)
+                                img_r.raise_for_status()
+                                return img_r.content
+                            except Exception as e:
+                                logger.warning(f"Failed to download from {img_url}: {e}")
+                                continue
+                        import base64
+                        b64 = (
+                            chunk.get("b64_json") or
+                            (chunk.get("data") or [{}])[0].get("b64_json", "")
+                        )
+                        if b64:
+                            return base64.b64decode(b64)
+                    except (_json.JSONDecodeError, Exception):
+                        continue
+        raise ValueError(f"airforce {model}: no image found in SSE stream")
+
     else:
-        # Legacy /imagine2 endpoint — no key needed
+        # Legacy /imagine2 — no key needed
         url = (
             f"https://api.airforce/imagine2"
             f"?prompt={quote(prompt)}"
@@ -489,20 +557,40 @@ def generate_image_airforce(prompt: str, width=1024, height=1024,
         r = requests.get(url, timeout=60)
         r.raise_for_status()
         if r.headers.get("content-type", "").startswith("application/json"):
-            raise ValueError(f"airforce JSON: {r.text[:200]}")
+            raise ValueError(f"airforce /imagine2 returned JSON: {r.text[:200]}")
         return r.content
 
-
 def _try_airforce(prompt: str, width: int, height: int) -> bytes | None:
-    """Try api.airforce — tries authenticated first, then anonymous."""
+    """Try api.airforce — tries best available model first."""
+    # Skip on PythonAnywhere (anondrop.net is blocked)
+    import os
+    if os.environ.get("PYTHONANYWHERE_DOMAIN") or os.environ.get("PYTHONANYWHERE_SITE"):
+        logger.info("Skipping api.airforce (running on PythonAnywhere - anondrop.net blocked)")
+        return None
+    
     api_key = _get_image_key("airforce")
 
-    # Try with key first (better models)
     if api_key:
-        for model in ["dirtberry", "special-berry", "z-image"]:
+        # Get preferred model from Config, fallback to ordered list
+        preferred = ""
+        try:
+            from database.models import Config
+            preferred = Config.get("airforce_image_model", "")
+        except Exception:
+            pass
+
+        # Build model list: preferred first, then rest
+        models_to_try = list(AIRFORCE_IMAGE_MODELS_ORDERED[:-1])  # exclude "flux"
+        if preferred and preferred in models_to_try:
+            models_to_try.remove(preferred)
+            models_to_try.insert(0, preferred)
+        elif preferred and preferred not in models_to_try:
+            models_to_try.insert(0, preferred)
+
+        for model in models_to_try:
             try:
                 result = generate_image_airforce(prompt, width, height, model, api_key)
-                logger.info(f"✅ Image via api.airforce ({model}, authenticated)")
+                logger.info(f"✅ Image via api.airforce ({model})")
                 return result
             except Exception as e:
                 logger.warning(f"api.airforce {model} failed: {e}")
@@ -525,13 +613,13 @@ POLLINATIONS_MODELS = ["flux", "turbo", "gptimage", "kontext"]
 def generate_image_pollinations(prompt, model="flux", width=1080, height=1350,
                                  api_key="") -> bytes:
     """
-    Pollinations — new endpoint image.pollinations.ai (2025+).
-    Bearer token removes watermark and raises rate limit.
-    Works without token as last fallback.
+    Pollinations — gen.pollinations.ai endpoint with Bearer authentication.
+    API key (sk_ or pk_) removes watermark and raises rate limit.
+    Works without token as fallback.
     """
     encoded = quote(prompt)
     url = (
-        f"https://image.pollinations.ai/prompt/{encoded}"
+        f"https://gen.pollinations.ai/image/{encoded}"
         f"?model={model}&width={width}&height={height}"
         f"&seed=0&nologo=true&private=true&enhance=false"
     )
@@ -547,6 +635,20 @@ def upload_to_cloudinary(image_bytes, cloud_name, api_key, api_secret,
                           folder="social_posts"):
     """Upload image bytes to Cloudinary. Returns (secure_url, public_id)."""
     import hashlib
+    
+    # Validate image bytes before upload
+    if not image_bytes or len(image_bytes) < 100:
+        raise ValueError("Image bytes are empty or too small")
+    
+    # Verify image integrity
+    try:
+        from PIL import Image
+        img = Image.open(io.BytesIO(image_bytes))
+        img.verify()
+        logger.info(f"Uploading valid image ({len(image_bytes)} bytes) to Cloudinary")
+    except Exception as e:
+        raise ValueError(f"Invalid image data: {e}")
+    
     ts = int(time.time())
     sig = hashlib.sha1(
         (f"folder={folder}&timestamp={ts}" + api_secret).encode()
@@ -626,7 +728,7 @@ def process_image(post_data, cfg):
       5.  🔷  Stability AI SD 3.5             (مدفوع)
       6.  🤗  HuggingFace Flux               (مجاني بمفتاح)
       7.  🔗  Together AI Flux Free           (مجاني بمفتاح)
-      8.  ⚡  Fal.ai Flux Schnell             (مجاني محدود)
+      8.  ⚡  Fal.ai FLUX.1 Schnell           (رخيص $0.003/صورة)
       9.  🛩️  api.airforce                   (مجاني بدون مفتاح)
       10. 🌸  Pollinations (authenticated)    (مجاني بـ token)
       11. 🌸  Pollinations (anonymous)        (last fallback)
@@ -673,18 +775,43 @@ def process_image(post_data, cfg):
         try:
             result = fn()
             if result:
-                image_bytes   = result
-                used_provider = provider_name
-                logger.info(f"✅ Image via {provider_name}")
+                # Validate image before accepting it
+                if len(result) < 100:
+                    logger.warning(f"{provider_name} returned image too small ({len(result)} bytes)")
+                    continue
+                
+                # Verify image integrity
+                try:
+                    from PIL import Image
+                    img_test = Image.open(io.BytesIO(result))
+                    img_test.verify()
+                    image_bytes   = result
+                    used_provider = provider_name
+                    logger.info(f"✅ Image via {provider_name} ({len(result)} bytes)")
+                except Exception as e:
+                    logger.warning(f"{provider_name} returned invalid image: {e}")
+                    continue
         except Exception as e:
             logger.warning(f"{provider_name} failed: {e}")
 
     # Always-on fallback: Pollinations anonymous (not in chain, guaranteed)
     if image_bytes is None:
         try:
-            image_bytes   = generate_image_pollinations(enhanced, width=width, height=height)
-            used_provider = "pollinations_anon"
-            logger.info("✅ Image via Pollinations (anonymous fallback)")
+            result = generate_image_pollinations(enhanced, width=width, height=height)
+            if result and len(result) > 100:
+                # Verify fallback image too
+                try:
+                    from PIL import Image
+                    img_test = Image.open(io.BytesIO(result))
+                    img_test.verify()
+                    image_bytes   = result
+                    used_provider = "pollinations_anon"
+                    logger.info(f"✅ Image via Pollinations (anonymous fallback, {len(result)} bytes)")
+                except Exception as e:
+                    logger.error(f"Pollinations fallback returned invalid image: {e}")
+                    raise RuntimeError("All image providers failed — even Pollinations fallback")
+            else:
+                raise RuntimeError("Pollinations fallback returned empty/small image")
         except Exception as e:
             logger.error(f"All image providers failed: {e}")
             raise RuntimeError(
@@ -790,9 +917,9 @@ IMAGE_PROVIDERS_INFO = {
         "note": "مجاني — api.together.xyz",
     },
     "fal": {
-        "label": "Fal.ai (Flux Schnell)", "icon": "⚡", "free": True,
-        "key_required": True,
-        "note": "مجاني محدود — fal.ai/dashboard",
+        "label": "Fal.ai (FLUX.1 Schnell)", "icon": "⚡", "free": False,
+        "key_required": True, "pricing": "$0.003/صورة",
+        "note": "رخيص جداً — أسرع نموذج FLUX — fal.ai/dashboard",
     },
     "airforce": {
         "label": "api.airforce (بدون مفتاح)", "icon": "🛩️", "free": True,

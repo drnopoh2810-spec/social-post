@@ -130,34 +130,68 @@ def create_app(config_name=None):
         _seed_admin(app)
         _seed_defaults()
         _seed_from_env()
-        # Restore config from Redis if DB was wiped (restart)
+        
+        # ✅ Auto-sync with Google Sheets (bidirectional)
         try:
-            from services.redis_config import sync_redis_to_db, sync_db_to_redis
-            restored = sync_redis_to_db()
-            if restored:
-                logger.info(f"Restored {restored} config values from Redis")
-            else:
-                sync_db_to_redis()  # First run — push DB → Redis
+            from services.config_sheets_sync import is_configured, restore_all_from_sheets, sync_all_to_sheets
+            from database.models import Config as Cfg
+            
+            if is_configured():
+                # Check if this is first run (no config in DB)
+                config_count = Cfg.query.count()
+                
+                # Try to restore from Sheets first
+                logger.info("🔄 Checking Google Sheets for existing config...")
+                counts = restore_all_from_sheets()
+                
+                if counts and sum(counts.values()) > 0:
+                    # Sheets has data → restore it
+                    total = sum(counts.values())
+                    logger.info(f"✅ Restored {total} items from Sheets: {counts}")
+                elif config_count >= 5:
+                    # DB has data but Sheets is empty → push DB to Sheets
+                    logger.info("📤 Sheets is empty — pushing current DB config to Sheets...")
+                    push_counts = sync_all_to_sheets()
+                    if push_counts:
+                        total = sum(push_counts.values())
+                        logger.info(f"✅ Initialized Sheets with {total} items: {push_counts}")
+                else:
+                    # Both empty → use defaults and push to Sheets
+                    logger.info("📊 Both DB and Sheets empty — using defaults and syncing to Sheets...")
+                    push_counts = sync_all_to_sheets()
+                    if push_counts:
+                        total = sum(push_counts.values())
+                        logger.info(f"✅ Initialized Sheets with defaults: {push_counts}")
         except Exception as e:
-            logger.warning(f"Redis sync skipped: {e}")
-
+            logger.warning(f"Google Sheets config sync skipped: {e}")
+        
         # Restore posts from Google Sheets if DB is empty
         try:
-            from services.sheets_sync import is_configured, restore_from_sheets
+            from services.sheets_sync import is_configured as sheets_configured, restore_from_sheets, push_all_posts
             from database.models import Post
-            if is_configured():
+            if sheets_configured():
                 post_count = Post.query.count()
                 if post_count == 0:
+                    # Try to restore from Sheets
                     restored = restore_from_sheets()
                     if restored:
-                        logger.info(f"Restored {restored} posts from Google Sheets")
+                        logger.info(f"✅ Restored {restored} posts from Google Sheets")
+                    else:
+                        logger.info("📝 No posts in Sheets — starting fresh")
                 else:
-                    # Sync any newer engagement data from Sheets
+                    # DB has posts — sync any newer engagement data from Sheets
                     restored = restore_from_sheets()
                     if restored:
-                        logger.info(f"Updated {restored} posts from Google Sheets")
+                        logger.info(f"✓ Updated {restored} posts from Google Sheets")
+                    
+                    # Also push any new posts from DB to Sheets
+                    try:
+                        push_all_posts()
+                        logger.info("✓ Synced posts to Google Sheets")
+                    except Exception:
+                        pass
         except Exception as e:
-            logger.warning(f"Google Sheets restore skipped: {e}")
+            logger.warning(f"Google Sheets posts sync skipped: {e}")
 
     _app_instance = app
     _setup_scheduler(app)

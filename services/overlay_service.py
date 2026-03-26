@@ -210,11 +210,26 @@ def apply_text_overlay(image_bytes: bytes, text: str, cfg: dict = None) -> bytes
 
     if not text or not text.strip():
         return image_bytes
+    
+    # Validate image bytes
+    if not image_bytes or len(image_bytes) < 100:
+        logger.warning("Image bytes too small for overlay")
+        return image_bytes
 
     if cfg is None:
         cfg = _get_overlay_cfg()
 
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+    try:
+        # Verify image integrity before processing
+        img_test = Image.open(io.BytesIO(image_bytes))
+        img_test.verify()
+        
+        # Reopen image after verify (verify closes the file)
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+    except Exception as e:
+        logger.warning(f"Cannot open image for overlay: {e}")
+        return image_bytes
+    
     W, H = img.size
 
     # ── Load font ─────────────────────────────────────────────────────────────

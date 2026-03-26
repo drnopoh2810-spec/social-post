@@ -13,7 +13,7 @@ PROVIDER_BASE_URLS = {
     "groq":       "https://api.groq.com/openai/v1/chat/completions",
     "openrouter": "https://openrouter.ai/api/v1/chat/completions",
     "openai":     "https://api.openai.com/v1/chat/completions",
-    "airforce":   "https://api.airforce/v1/chat/completions",  # NEW — مجاني
+    "airforce":   "https://api.airforce/v1/messages",  # airforce uses /v1/messages
 }
 
 

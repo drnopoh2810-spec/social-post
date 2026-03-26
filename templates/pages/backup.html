@@ -36,32 +36,32 @@
   <div id="import-result" style="margin-top:14px"></div>
 </div>
 
-<!-- Redis Sync -->
-<div class="card">
-  <div class="card-title">☁️ مزامنة مع Redis (Upstash)</div>
-  <div class="info-box">
-    💡 يحفظ كل الإعدادات الحالية في Redis — تُستعاد تلقائياً عند أي restart أو نقل للسيرفر.
-  </div>
-  <div class="btn-group">
-    <button class="btn btn-secondary" onclick="checkRedis()">🔍 تحقق من الاتصال</button>
-    <button class="btn btn-primary" onclick="pushToRedis()">🔄 حفظ في Redis الآن</button>
-    <button class="btn btn-secondary" onclick="forceSyncRedis()">⚡ Force Sync DB→Redis</button>
-  </div>
-  <div id="redis-result" style="margin-top:14px"></div>
-</div>
-
 <!-- Google Sheets Sync -->
 <div class="card">
-  <div class="card-title">📊 مزامنة مع Google Sheets</div>
+  <div class="card-title">📊 مزامنة تلقائية مع Google Sheets</div>
   <div class="info-box">
-    💡 Google Sheets كـ backup للمنشورات — لو اتمسحت الـ DB يرجع منها تلقائياً عند الـ restart.
-    <br>أضف في HF Secrets: <code>GOOGLE_SHEETS_CREDENTIALS</code> و <code>GOOGLE_SHEET_ID</code>
+    💡 <strong>جميع الإعدادات تُحفظ تلقائياً في Google Sheets</strong> — أي تغيير في الإعدادات يُحفظ فوراً.
+    <br>📋 Sheet ID: <code>1b7FSivlYSy8rbMhW5AyruU4TZ4OdzeBKirCHk6bUKRQ</code>
+    <br>🔗 <a href="https://docs.google.com/spreadsheets/d/1b7FSivlYSy8rbMhW5AyruU4TZ4OdzeBKirCHk6bUKRQ/edit?gid=0#gid=0" target="_blank" style="color:var(--primary)">فتح الـ Sheet</a>
   </div>
   <div class="btn-group">
-    <button class="btn btn-primary" onclick="pushToSheets()">⬆️ رفع كل المنشورات للـ Sheet</button>
-    <button class="btn btn-secondary" onclick="restoreFromSheets()">⬇️ استعادة من الـ Sheet</button>
+    <button class="btn btn-primary" onclick="syncAllToSheets()">⬆️ حفظ جميع الإعدادات الآن</button>
+    <button class="btn btn-secondary" onclick="restoreAllFromSheets()">⬇️ استعادة جميع الإعدادات</button>
+    <button class="btn btn-secondary" onclick="pushPostsToSheets()">📝 رفع المنشورات</button>
   </div>
   <div id="sheets-result" style="margin-top:14px"></div>
+  
+  <div style="margin-top:16px;padding:12px;background:var(--bg3);border-radius:8px;font-size:13px">
+    <div style="font-weight:600;margin-bottom:8px;color:var(--text1)">📋 ما يتم حفظه في الـ Sheet:</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;color:var(--text2)">
+      <div>✅ جميع الإعدادات (Config)</div>
+      <div>✅ مفاتيح AI (Cohere, Gemini, إلخ)</div>
+      <div>✅ مفاتيح API (Facebook, Twitter, إلخ)</div>
+      <div>✅ البرومبتات المخصصة</div>
+      <div>✅ إعدادات المنصات</div>
+      <div>✅ المنشورات (Posts)</div>
+    </div>
+  </div>
 </div>
 
 <!-- What's included -->
@@ -116,64 +116,20 @@ function importBackup(){
   });
 }
 
-function pushToRedis(){
-  document.getElementById('redis-result').innerHTML = '<div style="color:var(--text3)">جاري الحفظ...</div>';
-  fetch('/api/backup/push-redis',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()}
-  }).then(r=>r.json()).then(d=>{
-    const el = document.getElementById('redis-result');
-    if(d.ok){
-      el.innerHTML = `<div class="info-box" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:#6ee7b7">✅ ${d.message}</div>`;
-      toast('✅ تم الحفظ في Redis','green');
-    } else {
-      el.innerHTML = `<div class="warning-box">❌ ${d.error}</div>`;
-    }
-  });
-}
-
-function checkRedis(){
-  const el = document.getElementById('redis-result');
-  el.innerHTML = '<div style="color:var(--text3)">⏳ جاري التحقق...</div>';
-  fetch('/api/redis/status').then(r=>r.json()).then(d=>{
-    if(d.connected){
-      el.innerHTML = `<div class="info-box" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:#6ee7b7">
-        ✅ متصل بـ Redis — ${d.keys_count} مفتاح محفوظ
-      </div>`;
-    } else {
-      el.innerHTML = `<div class="warning-box">
-        ❌ غير متصل — ${d.error || 'تحقق من REDIS_URL في الإعدادات'}
-      </div>`;
-    }
-  });
-}
-
-function forceSyncRedis(){
-  const el = document.getElementById('redis-result');
-  el.innerHTML = '<div style="color:var(--text3)">⏳ جاري الـ sync...</div>';
-  fetch('/api/redis/sync',{
+function syncAllToSheets(){
+  document.getElementById('sheets-result').innerHTML = '<div style="color:var(--text3)">⏳ جاري حفظ جميع الإعدادات...</div>';
+  fetch('/api/config/sync-to-sheets',{
     method:'POST',
     headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()}
   }).then(r=>r.json()).then(d=>{
     if(d.ok){
-      el.innerHTML = `<div class="info-box" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:#6ee7b7">✅ ${d.message}</div>`;
-      toast('✅ تم sync DB → Redis','green');
-    } else {
-      el.innerHTML = `<div class="warning-box">❌ ${d.error}</div>`;
-    }
-  });
-}
-
-function pushToSheets(){
-  document.getElementById('sheets-result').innerHTML = '<div style="color:var(--text3)">جاري الرفع...</div>';
-  fetch('/api/backup/push-sheets',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()}
-  }).then(r=>r.json()).then(d=>{
-    if(d.ok){
+      const c = d.counts;
       document.getElementById('sheets-result').innerHTML =
-        `<div class="info-box" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:#6ee7b7">✅ ${d.message}</div>`;
-      toast('✅ تم الرفع للـ Sheet','green');
+        `<div class="info-box" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:#6ee7b7">
+          ✅ تم حفظ جميع الإعدادات في Google Sheets!<br>
+          ⚙️ Config: ${c.config} | 🤖 AI Keys: ${c.ai_keys} | 🔑 API Keys: ${c.api_keys} | ✍️ Prompts: ${c.prompts} | 📱 Platforms: ${c.platforms}
+        </div>`;
+      toast('✅ تم الحفظ في Sheets','green');
     } else {
       document.getElementById('sheets-result').innerHTML =
         `<div class="warning-box">❌ ${d.error}</div>`;
@@ -181,17 +137,39 @@ function pushToSheets(){
   });
 }
 
-function restoreFromSheets(){
-  if(!confirm('سيتم استيراد البيانات من Google Sheets — هل تريد المتابعة؟')) return;
-  document.getElementById('sheets-result').innerHTML = '<div style="color:var(--text3)">جاري الاستعادة...</div>';
-  fetch('/api/backup/restore-sheets',{
+function restoreAllFromSheets(){
+  if(!confirm('سيتم استعادة جميع الإعدادات من Google Sheets — هل تريد المتابعة؟')) return;
+  document.getElementById('sheets-result').innerHTML = '<div style="color:var(--text3)">⏳ جاري الاستعادة...</div>';
+  fetch('/api/config/restore-from-sheets',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()}
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      const c = d.counts;
+      document.getElementById('sheets-result').innerHTML =
+        `<div class="info-box" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:#6ee7b7">
+          ✅ تم استعادة الإعدادات من Google Sheets!<br>
+          ⚙️ Config: ${c.config} | 🤖 AI Keys: ${c.ai_keys} | 🔑 API Keys: ${c.api_keys} | ✍️ Prompts: ${c.prompts} | 📱 Platforms: ${c.platforms}
+        </div>`;
+      toast('✅ تم الاستعادة','green');
+      setTimeout(() => location.reload(), 2000);
+    } else {
+      document.getElementById('sheets-result').innerHTML =
+        `<div class="warning-box">❌ ${d.error}</div>`;
+    }
+  });
+}
+
+function pushPostsToSheets(){
+  document.getElementById('sheets-result').innerHTML = '<div style="color:var(--text3)">⏳ جاري رفع المنشورات...</div>';
+  fetch('/api/backup/push-sheets',{
     method:'POST',
     headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()}
   }).then(r=>r.json()).then(d=>{
     if(d.ok){
       document.getElementById('sheets-result').innerHTML =
         `<div class="info-box" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:#6ee7b7">✅ ${d.message}</div>`;
-      toast('✅ تم الاستعادة','green');
+      toast('✅ تم رفع المنشورات','green');
     } else {
       document.getElementById('sheets-result').innerHTML =
         `<div class="warning-box">❌ ${d.error}</div>`;

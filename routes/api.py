@@ -183,6 +183,15 @@ _STATIC_MODELS = {
         {"id": "gpt-4o",        "name": "GPT-4o (مدفوع)",            "free": False},
         {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo (مدفوع)",    "free": False},
     ],
+    "together": [
+        {"id": "Qwen/Qwen3.5-9B",                        "name": "Qwen 3.5 9B (مجاني ⭐)",          "free": True},
+        {"id": "meta-llama/Llama-3.3-70B-Instruct-Turbo","name": "Llama 3.3 70B Turbo (مجاني)",    "free": True},
+        {"id": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo","name": "Llama 3.1 8B Turbo (مجاني)","free": True},
+        {"id": "mistralai/Mixtral-8x7B-Instruct-v0.1",   "name": "Mixtral 8x7B (مجاني)",           "free": True},
+        {"id": "google/gemma-2-9b-it",                   "name": "Gemma 2 9B (مجاني)",             "free": True},
+        {"id": "deepseek-ai/DeepSeek-R1",                "name": "DeepSeek R1 (مدفوع)",            "free": False},
+        {"id": "Qwen/Qwen2.5-72B-Instruct-Turbo",        "name": "Qwen 2.5 72B Turbo (مدفوع)",    "free": False},
+    ],
 }
 
 
@@ -307,13 +316,63 @@ def _fetch_airforce_models(api_key: str = "") -> list:
             price = m.get("pricepermilliontokens", 999)
             owner = m.get("owned_by", "")
             is_free = price == 0
-            cost_label = "(مجاني تماماً)" if is_free else f"(${price/1000:.3f}/1K tokens)"
-            result.append({
-                "id": mid,
-                "name": f"{mid} [{owner}] {cost_label}",
-                "free": is_free,
-            })
+            cost_label = "(مجاني تماماً)" if is_free else f"(${price/1000:.3f}/1K)"
+            result.append({"id": mid, "name": f"{mid} [{owner}] {cost_label}", "free": is_free, "type": "chat"})
         return sorted(result, key=lambda x: (not x["free"], x["id"]))
+    except Exception:
+        return []
+
+
+def _fetch_airforce_image_models(api_key: str = "") -> list:
+    """Fetch ALL image models from api.airforce — including paid and outage ones."""
+    import requests as req
+    try:
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        r = req.get("https://api.airforce/v1/models", headers=headers, timeout=10)
+        if not r.ok:
+            return []
+        result = []
+        status_order = {"operational": 0, "partial_outage": 1, "degraded": 2, "major_outage": 3}
+        for m in r.json().get("data", []):
+            if not m.get("supports_images"):
+                continue
+            mid    = m.get("id", "")
+            status = m.get("status", "unknown")
+            price  = m.get("pricepermilliontokens", 0)
+            owner  = m.get("owned_by", "")
+            latency = m.get("latency_ms", 0)
+            is_free = price == 0
+
+            # Status icon
+            icon = {"operational": "✅", "partial_outage": "⚠️",
+                    "degraded": "🟡", "major_outage": "❌"}.get(status, "❓")
+
+            # Price label
+            if is_free:
+                cost = "مجاني"
+            elif price < 100:
+                cost = f"${price/1000:.3f}/img رخيص"
+            elif price < 1000:
+                cost = f"${price/1000:.2f}/img"
+            else:
+                cost = f"${price/1000:.1f}/img مرتفع"
+
+            result.append({
+                "id":     mid,
+                "name":   f"{icon} {mid} [{owner}] ({cost})",
+                "free":   is_free,
+                "status": status,
+                "price":  price,
+                "latency": latency,
+                "type":   "image",
+            })
+
+        # Sort: operational → partial → degraded → outage, then by price
+        return sorted(result, key=lambda x: (
+            status_order.get(x["status"], 9),
+            x["price"],
+            x["id"]
+        ))
     except Exception:
         return []
 
@@ -358,6 +417,8 @@ def list_models():
             models = _fetch_openrouter_models(api_key)
         elif provider == "airforce":
             models = _fetch_airforce_models(api_key)
+        elif provider == "airforce_image":
+            models = _fetch_airforce_image_models(api_key)
 
         if models:
             source = "live"
@@ -597,6 +658,9 @@ def reset_prompts():
         return jsonify({'ok': True, 'message': f'تم إعادة ضبط {len(PROMPTS)} برومبت ✅'})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]})
+
+
+@api_bp.route('/telegram/test', methods=['POST'])
 @login_required
 def test_telegram():
     try:
@@ -771,21 +835,6 @@ def import_backup():
         pass
 
     return jsonify({'ok': True, 'restored': restored})
-
-
-@api_bp.route('/backup/push-redis', methods=['POST'])
-@login_required
-def push_to_redis():
-    """دفع كل الإعدادات الحالية إلى Redis يدوياً."""
-    try:
-        from services.redis_config import sync_db_to_redis, get_redis
-        r = get_redis()
-        if not r:
-            return jsonify({'ok': False, 'error': 'REDIS_URL غير مضبوط'})
-        sync_db_to_redis()
-        return jsonify({'ok': True, 'message': 'تم حفظ الإعدادات في Redis ✅'})
-    except Exception as e:
-        return jsonify({'ok': False, 'error': str(e)[:200]})
 
 
 @api_bp.route('/backup/push-sheets', methods=['POST'])
@@ -1229,6 +1278,36 @@ def get_overlay_fonts():
 
 # ── Provider chain order ──────────────────────────────────────────────────────
 
+@api_bp.route('/config/sync-to-sheets', methods=['POST'])
+@login_required
+def sync_config_to_sheets():
+    """Sync all configuration to Google Sheets."""
+    try:
+        from services.config_sheets_sync import sync_all_to_sheets, is_configured
+        if not is_configured():
+            return jsonify({'ok': False, 'error': 'Google Sheets غير مضبوط — أضف GOOGLE_SHEETS_CREDENTIALS و GOOGLE_SHEET_ID'})
+        
+        counts = sync_all_to_sheets()
+        return jsonify({'ok': True, 'counts': counts, 'message': '✅ تم حفظ جميع الإعدادات في Google Sheets'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]})
+
+
+@api_bp.route('/config/restore-from-sheets', methods=['POST'])
+@login_required
+def restore_config_from_sheets():
+    """Restore all configuration from Google Sheets."""
+    try:
+        from services.config_sheets_sync import restore_all_from_sheets, is_configured
+        if not is_configured():
+            return jsonify({'ok': False, 'error': 'Google Sheets غير مضبوط'})
+        
+        counts = restore_all_from_sheets()
+        return jsonify({'ok': True, 'counts': counts, 'message': '✅ تم استعادة جميع الإعدادات من Google Sheets'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]})
+
+
 @api_bp.route('/provider-chain', methods=['GET'])
 @login_required
 def get_provider_chain():
@@ -1257,38 +1336,3 @@ def save_provider_chain():
     return jsonify({'ok': True})
 
 
-@api_bp.route('/redis/status', methods=['GET'])
-@login_required
-def redis_status():
-    """Check Redis connection status and key count."""
-    try:
-        from services.redis_config import reset_redis_client, _init_client, _client
-        reset_redis_client()
-        connected = _init_client()
-        if not connected:
-            return jsonify({'ok': False, 'connected': False,
-                            'error': 'تعذّر الاتصال — تحقق من REDIS_URL في /config'})
-        keys = _client.keys('config:*') or []
-        return jsonify({
-            'ok': True, 'connected': True,
-            'keys_count': len(keys),
-            'message': f'✅ متصل عبر Upstash SDK — {len(keys)} مفتاح محفوظ'
-        })
-    except Exception as e:
-        return jsonify({'ok': False, 'connected': False, 'error': str(e)[:200]})
-
-
-@api_bp.route('/redis/sync', methods=['POST'])
-@login_required
-def redis_force_sync():
-    """Force sync DB → Redis."""
-    try:
-        from services.redis_config import sync_db_to_redis, reset_redis_client, _init_client, _client
-        reset_redis_client()
-        if not _init_client():
-            return jsonify({'ok': False, 'error': 'Redis غير متصل — تحقق من REDIS_URL'})
-        sync_db_to_redis()
-        keys = _client.keys('config:*') or []
-        return jsonify({'ok': True, 'message': f'✅ تم sync {len(keys)} مفتاح إلى Redis'})
-    except Exception as e:
-        return jsonify({'ok': False, 'error': str(e)[:200]})

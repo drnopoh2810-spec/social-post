@@ -107,6 +107,7 @@ class Config(db.Model):
         'worker_url':                  'WORKER_URL',
         'pollinations_key':            'POLLINATIONS_KEY',
         'apyhub_token':                'APYHUB_TOKEN',
+        'airforce_image_model':        'AIRFORCE_IMAGE_MODEL',
         # ── Image Text Overlay ────────────────────────────────────────────────
         'overlay_enabled':             'OVERLAY_ENABLED',
         'overlay_text_source':         'OVERLAY_TEXT_SOURCE',
@@ -184,7 +185,7 @@ class Config(db.Model):
 
     @staticmethod
     def set(key, value):
-        """Save to both DB and Redis."""
+        """Save to DB and auto-sync to Google Sheets."""
         from database.models import db
         # Save to DB
         row = db.session.get(Config, key)
@@ -194,17 +195,13 @@ class Config(db.Model):
             row = Config(key=key, value=value)
             db.session.add(row)
         db.session.commit()
-        # If redis_url just changed, reset the client so it reconnects
-        if key == 'redis_url':
-            try:
-                from services.redis_config import reset_redis_client
-                reset_redis_client()
-            except Exception:
-                pass
-        # Save to Redis
+        
+        # Auto-sync to Google Sheets (async, non-blocking)
         try:
-            from services.redis_config import redis_set
-            redis_set(key, value)
+            from services.config_sheets_sync import sync_config_to_sheets, is_configured
+            if is_configured():
+                import threading
+                threading.Thread(target=sync_config_to_sheets, daemon=True).start()
         except Exception:
             pass
 

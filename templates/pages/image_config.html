@@ -88,6 +88,47 @@
   </div>
 </div>
 
+<!-- api.airforce Image Models -->
+<div class="card">
+  <div class="card-title">🛩️ نماذج api.airforce للصور</div>
+  <div class="info-box" style="margin-bottom:12px;font-size:13px">
+    💡 أضف مفتاح api.airforce في <a href="/ai-keys" style="color:var(--accent)">🗝️ مفاتيح AI</a>
+    ثم اضغط "تحديث" لجلب كل النماذج المتاحة.
+    <br>✅ = يعمل | ⚠️ = partial | 🟡 = degraded | ❌ = outage (قد يعمل أحياناً)
+  </div>
+
+  <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+    <div class="form-group" style="flex:1;margin-bottom:0">
+      <label>النموذج الافتراضي لـ api.airforce</label>
+      <select id="airforce-img-model" style="width:100%">
+        <option value="">⏳ اضغط تحديث لجلب النماذج...</option>
+      </select>
+    </div>
+    <button class="btn btn-secondary" onclick="loadAirforceImageModels()" id="airforce-refresh-btn">
+      🔄 تحديث من API
+    </button>
+    <button class="btn btn-primary" onclick="saveAirforceModel()">
+      💾 حفظ الاختيار
+    </button>
+  </div>
+
+  <div id="airforce-models-status" style="font-size:12px;margin-bottom:8px"></div>
+
+  <!-- Model details table -->
+  <div id="airforce-models-table" style="display:none">
+    <div class="table-wrap" style="max-height:300px;overflow-y:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>الحالة</th><th>النموذج</th><th>المالك</th><th>السعر</th><th>السرعة</th><th>اختيار</th>
+          </tr>
+        </thead>
+        <tbody id="airforce-models-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <!-- Test image generation -->
 <div class="card">
   <div class="card-title">🧪 اختبار توليد صورة</div>
@@ -477,6 +518,84 @@ async function previewOverlay(){
     } else document.getElementById('overlay-preview-status').innerHTML='❌ '+(d.error||'فشل');
   }).catch(e=>{ btn.disabled=false; btn.textContent='👁️ معاينة'; });
 }
+
+async function loadAirforceImageModels(){
+  const btn    = document.getElementById('airforce-refresh-btn');
+  const status = document.getElementById('airforce-models-status');
+  const sel    = document.getElementById('airforce-img-model');
+  const table  = document.getElementById('airforce-models-table');
+  const tbody  = document.getElementById('airforce-models-tbody');
+  btn.disabled = true; btn.textContent = '⏳ جاري الجلب...';
+  status.textContent = '';
+  try {
+    const r = await fetch('/api/models/list?provider=airforce_image');
+    const d = await r.json();
+    if(d.ok && d.models && d.models.length > 0){
+      const saved = '{{ cfg.get("airforce_image_model","") }}';
+      sel.innerHTML = '';
+      d.models.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.name;
+        if(m.id === saved) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      if(tbody){
+        const statusColors = {operational:'var(--green)',partial_outage:'var(--orange)',degraded:'#f59e0b',major_outage:'var(--red)'};
+        tbody.innerHTML = d.models.map(m => {
+          const color = statusColors[m.status] || 'var(--text3)';
+          const priceStr = m.price === 0 ? '<span style="color:var(--green)">مجاني</span>' : `${(m.price/1000).toFixed(3)}/img`;
+          const latency = m.latency ? `${(m.latency/1000).toFixed(1)}s` : '—';
+          const isSaved = m.id === saved;
+          const icon = m.name.split(' ')[0];
+          return `<tr style="${isSaved ? 'background:rgba(99,102,241,.1)' : ''}">
+            <td><span style="color:${color};font-size:16px">${icon}</span></td>
+            <td style="font-family:monospace;font-size:12px">${m.id}${isSaved ? ' ⭐' : ''}</td>
+            <td style="font-size:12px;color:var(--text3)">${m.name.match(/\[(.+?)\]/)?.[1] || '—'}</td>
+            <td>${priceStr}</td>
+            <td style="font-size:12px;color:var(--text3)">${latency}</td>
+            <td><button class="btn btn-secondary btn-sm" onclick="selectAirforceModel('${m.id}')">\u0627\u062e\u062a\u064a\u0627\u0631</button></td>
+          </tr>`;
+        }).join('');
+        if(table) table.style.display = 'block';
+      }
+      const free = d.models.filter(m => m.free).length;
+      const working = d.models.filter(m => ['operational','partial_outage','degraded'].includes(m.status)).length;
+      status.innerHTML = `✅ ${d.models.length} نموذج | ${working} يعمل | ${free} مجاني | ${d.source === 'live' ? 'مباشر من API' : 'افتراضي'}`;
+      status.style.color = 'var(--green)';
+    } else {
+      status.textContent = '⚠️ لا توجد نماذج — تأكد من إضافة مفتاح airforce في /ai-keys';
+      status.style.color = 'var(--orange)';
+    }
+  } catch(e) {
+    status.textContent = '❌ خطأ: ' + e;
+    status.style.color = 'var(--red)';
+  }
+  btn.disabled = false; btn.textContent = '🔄 تحديث من API';
+}
+
+function selectAirforceModel(modelId){
+  const sel = document.getElementById('airforce-img-model');
+  for(let i = 0; i < sel.options.length; i++){
+    if(sel.options[i].value === modelId){ sel.selectedIndex = i; break; }
+  }
+  saveAirforceModel();
+}
+
+function saveAirforceModel(){
+  const model = document.getElementById('airforce-img-model').value;
+  if(!model) return;
+  fetch('/api/config', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body: JSON.stringify({airforce_image_model: model})
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok) toast(`✅ تم حفظ: ${model}`, 'green');
+  });
+}
+
+// Load on page open
+loadAirforceImageModels();
 
 function testImage(){
   const btn = document.getElementById('test-btn');

@@ -22,15 +22,28 @@
 </div>
 
 <div class="info-box">
-  💡 <strong>كيف يعمل الـ Rotation:</strong>
-  النظام يجرب المفاتيح بالترتيب (Priority أصغر = أول). لو مفتاح وصل لـ Rate Limit أو انتهت حصته → يتحول تلقائياً للمفتاح الجاي.
-  بعد {{ 24 }} ساعة يتم إعادة تفعيل المفاتيح المنتهية تلقائياً.
+  💡 <strong>كيف يعمل النظام على مستويين:</strong><br>
+  <strong>المستوى 1 — Key Rotation:</strong> يجرب كل مفاتيح نفس الـ provider بالترتيب (Priority أصغر = أول).<br>
+  <strong>المستوى 2 — Provider Failover:</strong> لو كل مفاتيح provider انتهت → يتحول تلقائياً للـ provider الجاي في السلسلة.<br>
+  بعد 24 ساعة يتم إعادة تفعيل المفاتيح المنتهية تلقائياً.
+</div>
+
+<!-- Failover Chain Status -->
+<div class="card" style="margin-bottom:20px">
+  <div class="card-title">🔗 سلسلة الـ Failover (الترتيب التلقائي)</div>
+  <div id="failover-chain" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0">
+    <span style="color:var(--text3);font-size:13px">⏳ جاري التحميل...</span>
+  </div>
+  <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn btn-secondary btn-sm" onclick="refreshStatus()">🔄 تحديث الحالة</button>
+    <button class="btn btn-secondary btn-sm" onclick="resetAllProviders()">♻️ إعادة تفعيل كل المفاتيح</button>
+  </div>
 </div>
 
 <!-- Status Overview -->
 <div class="grid-4" style="margin-bottom:24px" id="status-grid">
-  {% set provider_labels = {'cohere':'Cohere','gemini':'Gemini','groq':'Groq','openrouter':'OpenRouter','openai':'OpenAI'} %}
-  {% set provider_icons = {'cohere':'🟡','gemini':'🔵','groq':'🟢','openrouter':'🟣','openai':'⚫'} %}
+  {% set provider_labels = {'cohere':'Cohere','gemini':'Gemini','groq':'Groq','openrouter':'OpenRouter','airforce':'api.airforce','openai':'OpenAI'} %}
+  {% set provider_icons = {'cohere':'🟡','gemini':'🔵','groq':'🟢','openrouter':'🟣','airforce':'🛩️','openai':'⚫'} %}
   {% for p in providers[:4] %}
   <div class="stat-card {{ 'green' if keys_by_provider[p]|selectattr('is_active')|selectattr('is_exhausted', 'equalto', False)|list|length > 0 else 'orange' }}" id="stat-{{ p }}">
     <div class="stat-label">{{ provider_icons.get(p,'') }} {{ provider_labels.get(p,p) }}</div>
@@ -152,6 +165,113 @@
   </div>
 </div>
 {% endfor %}
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- IMAGE GENERATION PROVIDERS                                              -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<div style="margin-top:32px">
+  <div style="font-size:18px;font-weight:900;margin-bottom:4px">🎨 مفاتيح توليد الصور</div>
+  <div style="font-size:13px;color:var(--text3);margin-bottom:16px">
+    الـ fallback chain: ☁️ Cloudflare → 🤗 HuggingFace → 🔗 Together → ⚡ Fal → 🌸 Pollinations
+  </div>
+</div>
+
+{% set img_icons  = {'gemini_image':'🔵','huggingface':'🤗','together':'🔗','fal':'⚡','pollinations':'🌸','ideogram':'🎨','openai_image':'🟢','stability':'🔷'} %}
+{% set img_labels = {
+  'gemini_image': 'Google Imagen 4 / Gemini Image ⭐',
+  'huggingface':  'HuggingFace Inference API',
+  'together':     'Together AI (Flux Free)',
+  'fal':          'Fal.ai (Flux Schnell)',
+  'pollinations': 'Pollinations (image.pollinations.ai)',
+  'ideogram':     'Ideogram v3 (أفضل نص عربي)',
+  'openai_image': 'OpenAI gpt-image-1 / DALL-E 3',
+  'stability':    'Stability AI (SD 3.5 Large)'
+} %}
+{% set img_notes = {
+  'gemini_image': '⭐ مجاني بنفس مفتاح Gemini — يدعم النص العربي — ai.google.dev/gemini-api',
+  'huggingface':  'مجاني — hf.co/settings/tokens',
+  'together':     'مجاني — api.together.xyz',
+  'fal':          'مجاني محدود — fal.ai/dashboard',
+  'pollinations': 'سجّل مجاناً على auth.pollinations.ai — Bearer token يزيل الـ watermark',
+  'ideogram':     '💰 مدفوع ~$0.08/صورة — الأفضل في النص العربي — developer.ideogram.ai',
+  'openai_image': '💰 مدفوع ~$0.04-0.08/صورة — platform.openai.com/api-keys',
+  'stability':    '💰 مدفوع ~$0.065/صورة — platform.stability.ai'
+} %}
+
+{% for provider in img_providers %}
+{% set keys = keys_by_provider[provider] %}
+<div class="card" id="section-{{ provider }}">
+  <div class="provider-header">
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="font-size:20px">{{ img_icons.get(provider,'🖼️') }}</span>
+      <div>
+        <div style="font-weight:700;font-size:16px">{{ img_labels.get(provider, provider) }}</div>
+        <div style="font-size:12px;color:var(--text3)">
+          {% set avail = keys|selectattr('is_active')|selectattr('is_exhausted','equalto',False)|list|length %}
+          <span style="color:{{ 'var(--green)' if avail > 0 else 'var(--orange)' }}">
+            {{ avail }} متاح
+          </span>
+          · {{ keys|length }} إجمالي
+          · <span style="color:var(--text3)">{{ img_notes.get(provider,'') }}</span>
+        </div>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="showAddForm('{{ provider }}')">+ إضافة مفتاح</button>
+  </div>
+
+  <!-- Add form -->
+  <div id="add-form-{{ provider }}" style="display:none;background:var(--bg3);border-radius:var(--radius2);padding:14px;margin-bottom:14px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div class="form-group" style="margin-bottom:0;flex:1;min-width:120px">
+        <label style="font-size:12px">التسمية</label>
+        <input type="text" id="new-label-{{ provider }}" placeholder="حساب 1" class="key-label-input">
+      </div>
+      <div class="form-group" style="margin-bottom:0;flex:3;min-width:200px">
+        <label style="font-size:12px">API Key</label>
+        <input type="password" id="new-key-{{ provider }}" placeholder="hf_... / together_... / key_..." class="key-value-input">
+      </div>
+      <div class="form-group" style="margin-bottom:0;width:80px">
+        <label style="font-size:12px">Priority</label>
+        <input type="number" id="new-priority-{{ provider }}" value="0" min="0" class="key-priority">
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="addKey('{{ provider }}')">حفظ</button>
+      <button class="btn btn-secondary btn-sm" onclick="hideAddForm('{{ provider }}')">إلغاء</button>
+    </div>
+  </div>
+
+  <!-- Keys list -->
+  <div id="keys-list-{{ provider }}">
+    {% if keys %}
+      {% for k in keys %}
+      <div class="key-card {{ 'exhausted' if k.is_exhausted else ('disabled' if not k.is_active else 'ok') }}">
+        <div style="font-size:18px">{{ '🔴' if k.is_exhausted else ('⚫' if not k.is_active else '🟢') }}</div>
+        <input type="text" value="{{ k.label or '' }}" class="key-label-input"
+               onchange="updateKey({{ k.id }}, {label: this.value})" placeholder="التسمية">
+        <input type="password" value="{{ k.key_value }}" class="key-value-input"
+               onchange="updateKey({{ k.id }}, {key_value: this.value})">
+        <input type="number" value="{{ k.priority }}" class="key-priority" min="0"
+               onchange="updateKey({{ k.id }}, {priority: parseInt(this.value)})">
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          {% if k.is_exhausted %}
+          <button class="btn btn-success btn-sm" onclick="resetKey({{ k.id }})">🔄</button>
+          {% endif %}
+          <button class="btn btn-secondary btn-sm" onclick="toggleKey({{ k.id }}, {{ 'false' if k.is_active else 'true' }})">
+            {{ '⏸️' if k.is_active else '▶️' }}
+          </button>
+          <button class="btn btn-danger btn-sm" onclick="deleteKey({{ k.id }}, '{{ provider }}')">🗑️</button>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div style="text-align:center;padding:20px;color:var(--text3);font-size:13px">
+        لا توجد مفاتيح — أضف مفتاحاً للبدء (اختياري — Pollinations يعمل بدون مفتاح)
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+
 {% endblock %}
 
 {% block extra_js %}
@@ -213,8 +333,9 @@ function deleteKey(id, provider){
 }
 
 // Live status refresh every 30s
-setInterval(()=>{
+function refreshStatus(){
   fetch('/api/ai-keys/status').then(r=>r.json()).then(data=>{
+    // Update stat cards
     Object.entries(data).forEach(([p, s])=>{
       const el = document.getElementById('stat-'+p);
       if(el){
@@ -222,7 +343,53 @@ setInterval(()=>{
         if(val) val.innerHTML = `${s.available} <span style="font-size:13px;color:var(--text3)">/ ${s.total}</span>`;
       }
     });
+
+    // Update failover chain
+    const chain = ['gemini','groq','cohere','openrouter','airforce','openai'];
+    const icons = {gemini:'🔵',groq:'🟢',cohere:'🟡',openrouter:'🟠',airforce:'🛩️',openai:'⚫'};
+    const labels = {gemini:'Gemini',groq:'Groq',cohere:'Cohere',openrouter:'OpenRouter',airforce:'airforce',openai:'OpenAI'};
+    const container = document.getElementById('failover-chain');
+    if(!container) return;
+
+    let html = '';
+    chain.forEach((p, i) => {
+      const s = data[p] || {available:0, total:0, healthy:false, has_config_key:false};
+      const usable = s.available > 0 || s.has_config_key;
+      const color = s.available > 0 ? 'var(--green)' : (s.has_config_key ? 'var(--orange)' : 'var(--red)');
+      const statusIcon = s.available > 0 ? '✅' : (s.has_config_key ? '⚠️' : '❌');
+      html += `
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 14px;
+                    border:1px solid ${color};border-radius:8px;min-width:90px;
+                    background:${usable ? 'rgba(0,0,0,.1)' : 'rgba(239,68,68,.05)'}">
+          <span style="font-size:18px">${icons[p]}</span>
+          <span style="font-size:12px;font-weight:700">${labels[p]}</span>
+          <span style="font-size:11px;color:${color}">${statusIcon} ${s.available}/${s.total} مفتاح</span>
+        </div>`;
+      if(i < chain.length - 1){
+        html += `<span style="font-size:20px;color:var(--text3);align-self:center">→</span>`;
+      }
+    });
+    container.innerHTML = html;
   });
-}, 30000);
+}
+
+function resetAllProviders(){
+  if(!confirm('إعادة تفعيل كل المفاتيح المنتهية في جميع الـ providers؟')) return;
+  const providers = ['gemini','groq','cohere','openrouter','openai'];
+  Promise.all(providers.map(p =>
+    fetch('/api/ai-keys/reset-all',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+      body:JSON.stringify({provider:p})
+    })
+  )).then(()=>{
+    toast('✅ تم إعادة تفعيل كل المفاتيح','green');
+    setTimeout(()=>location.reload(), 800);
+  });
+}
+
+// Load on page open + refresh every 30s
+refreshStatus();
+setInterval(refreshStatus, 30000);
 </script>
 {% endblock %}

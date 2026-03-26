@@ -36,29 +36,75 @@ SHEET_COLUMNS = [
 _gc = None   # gspread client (cached)
 
 
+def _parse_credentials(raw: str) -> dict:
+    """
+    Parse credentials from multiple formats:
+    1. JSON string (single or multi-line)
+    2. File path pointing to a .json file
+    3. Base64-encoded JSON (for env vars that can't hold special chars)
+    """
+    raw = raw.strip()
+
+    # Format 1: file path
+    if raw.startswith("/") or raw.startswith("~") or raw.endswith(".json"):
+        path = os.path.expanduser(raw)
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+
+    # Format 2: JSON string (may be multi-line or single-line)
+    if raw.startswith("{"):
+        # Normalize: replace literal \n inside private_key with actual newlines
+        # (some env systems escape the backslash)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            # Try fixing escaped newlines: \\n → \n
+            fixed = raw.replace("\\\\n", "\\n")
+            try:
+                return json.loads(fixed)
+            except json.JSONDecodeError:
+                pass
+
+    # Format 3: Base64-encoded JSON
+    try:
+        import base64
+        decoded = base64.b64decode(raw).decode("utf-8")
+        return json.loads(decoded)
+    except Exception:
+        pass
+
+    raise ValueError(
+        "GOOGLE_SHEETS_CREDENTIALS format not recognized.\n"
+        "Accepted formats:\n"
+        "  1. JSON string (single line or multi-line)\n"
+        "  2. Path to .json file: /home/user/credentials.json\n"
+        "  3. Base64-encoded JSON string"
+    )
+
+
 def _get_client():
     """Get or create authenticated gspread client."""
     global _gc
     if _gc is not None:
         return _gc
 
-    creds_json = os.environ.get("GOOGLE_SHEETS_CREDENTIALS", "")
-    if not creds_json:
-        # Try DB
+    raw = os.environ.get("GOOGLE_SHEETS_CREDENTIALS", "").strip()
+    if not raw:
         try:
             from database.models import Config
-            creds_json = Config.get("google_sheets_credentials", "")
+            raw = Config.get("google_sheets_credentials", "").strip()
         except Exception:
             pass
 
-    if not creds_json:
+    if not raw:
         raise ValueError("GOOGLE_SHEETS_CREDENTIALS not configured")
 
     try:
         import gspread
         from google.oauth2.service_account import Credentials
 
-        creds_dict = json.loads(creds_json)
+        creds_dict = _parse_credentials(raw)
         scopes = [
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/drive",
@@ -290,4 +336,201 @@ def is_configured() -> bool:
         return bool(Config.get("google_sheets_credentials") and
                     Config.get("google_sheet_id"))
     except Exception:
+        return False
+
+
+def sync_from_sheets_to_db():
+    """
+    Full bidirectional sync: Sheets → DB.
+    - New rows in Sheets → insert in DB
+    - Updated status/engagement in Sheets → update DB
+    - Returns (inserted, updated) counts
+    """
+    try:
+        from database.models import db, Post
+        ws = _get_sheet()
+        all_values = ws.get_all_values()
+
+        if len(all_values) < 2:
+            return 0, 0
+
+        header = all_values[0]
+        rows   = all_values[1:]
+
+        def col(row, name, default=""):
+            try:
+                idx = header.index(name)
+                return row[idx] if idx < len(row) else default
+            except ValueError:
+                return default
+
+        def parse_dt(s):
+            if not s: return None
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                try: return datetime.strptime(s, fmt)
+                except ValueError: pass
+            return None
+
+        inserted = updated = 0
+
+        for row in rows:
+            if not row or not row[0]:
+                continue
+            try:
+                post_id = int(row[0])
+            except (ValueError, IndexError):
+                continue
+
+            existing = Post.query.get(post_id)
+
+            if existing:
+                # Sync status change from Sheets → DB
+                sheet_status = col(row, "status") or existing.status
+                changed = False
+                if sheet_status != existing.status:
+                    existing.status = sheet_status
+                    changed = True
+                # Sync engagement
+                try:
+                    score = int(col(row, "engagement_score") or 0)
+                    if score != (existing.engagement_score or 0):
+                        existing.engagement_score = score
+                        existing.impressions = int(col(row, "impressions") or 0)
+                        existing.likes       = int(col(row, "engaged_users") or 0)
+                        existing.comments    = int(col(row, "reactions") or 0)
+                        changed = True
+                except Exception:
+                    pass
+                # Sync post_content if empty in DB but filled in Sheets
+                if not existing.post_content and col(row, "post_content"):
+                    existing.post_content = col(row, "post_content")
+                    changed = True
+                if changed:
+                    updated += 1
+            else:
+                # New row in Sheets → insert in DB
+                try:
+                    p = Post(
+                        id              = post_id,
+                        idea            = col(row, "idea"),
+                        keywords        = col(row, "keywords"),
+                        tone            = col(row, "tone"),
+                        status          = col(row, "status") or "NEW",
+                        created_at      = parse_dt(col(row, "created_at")) or datetime.utcnow(),
+                        posted_at       = parse_dt(col(row, "posted_at")),
+                        post_content    = col(row, "post_content"),
+                        fb_post_id      = col(row, "fb_post_id"),
+                        ig_post_id      = col(row, "ig_post_id"),
+                        x_post_id       = col(row, "x_post_id"),
+                        threads_post_id = col(row, "threads_post_id"),
+                        linkedin_post_id= col(row, "linkedin_post_id"),
+                        writing_style   = col(row, "writing_style"),
+                        opening_type    = col(row, "opening_type"),
+                        engagement_score= int(col(row, "engagement_score") or 0),
+                        impressions     = int(col(row, "impressions") or 0),
+                        likes           = int(col(row, "engaged_users") or 0),
+                        comments        = int(col(row, "reactions") or 0),
+                    )
+                    db.session.add(p)
+                    inserted += 1
+                except Exception as ex:
+                    logger.warning(f"Sheets sync insert error row {post_id}: {ex}")
+
+        if inserted or updated:
+            db.session.commit()
+            logger.info(f"Sheets→DB sync: {inserted} inserted, {updated} updated")
+
+        return inserted, updated
+
+    except Exception as e:
+        logger.warning(f"sync_from_sheets_to_db failed: {e}")
+        return 0, 0
+
+
+def write_ideas_to_sheets(ideas: list) -> int:
+    """
+    Write a list of new idea dicts directly to Google Sheets.
+    Each idea: {idea, keywords, tone, writing_style, opening_type}
+    Returns number of rows written.
+    Auto-assigns IDs based on last row in sheet.
+    """
+    try:
+        ws = _get_sheet()
+        all_values = ws.get_all_values()
+
+        # Ensure header
+        if not all_values or all_values[0] != SHEET_COLUMNS:
+            ws.clear()
+            ws.insert_row(SHEET_COLUMNS, index=1)
+            all_values = [SHEET_COLUMNS]
+
+        # Find next available ID
+        existing_ids = []
+        for row in all_values[1:]:
+            if row and row[0]:
+                try: existing_ids.append(int(row[0]))
+                except ValueError: pass
+        next_id = max(existing_ids, default=0) + 1
+
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        rows_to_add = []
+
+        for idea in ideas:
+            kw = idea.get("keywords", [])
+            if isinstance(kw, list):
+                kw = ", ".join(kw)
+            row = [
+                str(next_id),           # id
+                idea.get("idea", ""),   # idea
+                kw,                     # keywords
+                idea.get("tone", ""),   # tone
+                "NEW",                  # status
+                now,                    # created_at
+                "",                     # posted_at
+                "",                     # post_content
+                "", "", "", "", "",     # platform post IDs
+                idea.get("writing_style", ""),
+                idea.get("opening_type", ""),
+                "0", "0", "0", "0", "0",  # engagement fields
+            ]
+            rows_to_add.append(row)
+            next_id += 1
+
+        if rows_to_add:
+            ws.append_rows(rows_to_add, value_input_option="USER_ENTERED")
+            logger.info(f"Sheets: wrote {len(rows_to_add)} new ideas")
+
+        return len(rows_to_add)
+
+    except Exception as e:
+        logger.warning(f"write_ideas_to_sheets failed: {e}")
+        return 0
+
+
+def update_post_in_sheets(post_id: int, fields: dict):
+    """
+    Update specific fields for a post in Sheets by ID.
+    fields: dict of column_name → value
+    """
+    try:
+        ws = _get_sheet()
+        all_values = ws.get_all_values()
+        if len(all_values) < 2:
+            return False
+
+        header = all_values[0]
+        post_id_str = str(post_id)
+
+        for i, row in enumerate(all_values[1:], start=2):
+            if row and row[0] == post_id_str:
+                for col_name, value in fields.items():
+                    if col_name in header:
+                        col_idx = header.index(col_name) + 1  # 1-based
+                        ws.update_cell(i, col_idx, str(value) if value is not None else "")
+                logger.debug(f"Sheets: updated post #{post_id} fields {list(fields.keys())}")
+                return True
+
+        return False
+    except Exception as e:
+        logger.warning(f"update_post_in_sheets failed: {e}")
         return False

@@ -226,35 +226,73 @@ def post_threads_text(user_id: str, access_token: str, text: str) -> str:
 def post_linkedin_image(person_id: str, access_token: str, image_url: str,
                         text: str, idea_title: str = "") -> str:
     """
-    نشر صورة على LinkedIn.
-    LinkedIn لا يقبل image_url مباشرة في UGC — يجب رفع الصورة أولاً.
-    نستخدم originalUrl كـ article link بدلاً من ذلك.
+    نشر صورة على LinkedIn عبر رفع الصورة أولاً ثم نشرها.
+    Flow:
+    1. Register upload → get uploadUrl + asset URN
+    2. PUT image bytes to uploadUrl
+    3. Create UGC post with IMAGE media
     """
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
         "X-Restli-Protocol-Version": "2.0.0",
     }
-    # LinkedIn UGC with article (image as thumbnail)
+
+    # Step 1: Register image upload
+    reg_body = {
+        "registerUploadRequest": {
+            "recipes": ["urn:li:digitalmediaRecipe:feedshare-image"],
+            "owner": f"urn:li:person:{person_id}",
+            "serviceRelationships": [{
+                "relationshipType": "OWNER",
+                "identifier": "urn:li:userGeneratedContent",
+            }],
+        }
+    }
+    r = requests.post(
+        "https://api.linkedin.com/v2/assets?action=registerUpload",
+        headers=headers, json=reg_body, timeout=30,
+    )
+    _raise_with_detail(r, "LinkedIn register upload")
+    reg_data   = r.json()
+    upload_url = reg_data["value"]["uploadMechanism"]["com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"]["uploadUrl"]
+    asset_urn  = reg_data["value"]["asset"]
+
+    # Step 2: Upload image bytes
+    img_r = requests.get(image_url, timeout=60)
+    img_r.raise_for_status()
+    put_r = requests.put(
+        upload_url,
+        data=img_r.content,
+        headers={"Authorization": f"Bearer {access_token}",
+                 "Content-Type": "image/jpeg"},
+        timeout=60,
+    )
+    if not put_r.ok and put_r.status_code != 201:
+        raise requests.HTTPError(
+            f"LinkedIn image upload failed [{put_r.status_code}]: {put_r.text[:200]}"
+        )
+
+    # Step 3: Create UGC post with uploaded image
     body = {
         "author": f"urn:li:person:{person_id}",
         "lifecycleState": "PUBLISHED",
         "specificContent": {
             "com.linkedin.ugc.ShareContent": {
                 "shareCommentary": {"text": text[:3000]},
-                "shareMediaCategory": "ARTICLE",
+                "shareMediaCategory": "IMAGE",
                 "media": [{
                     "status": "READY",
-                    "originalUrl": image_url,
+                    "media": asset_urn,
                     "title": {"text": (idea_title or "")[:200]},
                 }],
             }
         },
         "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"},
     }
-    r = requests.post("https://api.linkedin.com/v2/ugcPosts", headers=headers, json=body, timeout=30)
-    _raise_with_detail(r, "LinkedIn image post")
-    return r.json().get("id", "")
+    r2 = requests.post("https://api.linkedin.com/v2/ugcPosts", headers=headers, json=body, timeout=30)
+    _raise_with_detail(r2, "LinkedIn image post")
+    return r2.json().get("id", "")
 
 
 def post_linkedin_text(person_id: str, access_token: str, text: str) -> str:

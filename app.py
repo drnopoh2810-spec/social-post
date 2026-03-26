@@ -48,6 +48,13 @@ def _auto_update_runner():
         check_and_update(_app_instance)
 
 
+def _analytics_runner():
+    """Update engagement metrics from all platforms every 6 hours."""
+    if _app_instance:
+        from services.analytics_service import bulk_update_metrics
+        bulk_update_metrics(app=_app_instance, limit=30)
+
+
 def _keep_alive_runner():
     """Self-ping to prevent free-tier sleep."""
     try:
@@ -548,6 +555,10 @@ def _setup_scheduler(app):
     # Auto-update from GitHub every 30 minutes
     scheduler.add_job(_auto_update_runner, IntervalTrigger(minutes=30),
                       id='auto_update', replace_existing=True)
+
+    # Analytics metrics refresh every 6 hours
+    scheduler.add_job(_analytics_runner, IntervalTrigger(hours=6),
+                      id='analytics_refresh', replace_existing=True)
 
     scheduler.start()
     logger.info("Scheduler started")

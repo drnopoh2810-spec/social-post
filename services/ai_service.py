@@ -13,6 +13,7 @@ PROVIDER_BASE_URLS = {
     "groq":       "https://api.groq.com/openai/v1/chat/completions",
     "openrouter": "https://openrouter.ai/api/v1/chat/completions",
     "openai":     "https://api.openai.com/v1/chat/completions",
+    "airforce":   "https://api.airforce/v1/chat/completions",  # NEW — مجاني
 }
 
 
@@ -73,12 +74,20 @@ def _call_gemini(api_key: str, model: str, system_prompt: str, user_prompt: str,
 def call_ai(provider: str, model_id: str, system_prompt: str, user_prompt: str,
             temperature=0.8, max_tokens=2048) -> str:
     """
-    Call an AI provider with automatic key rotation.
-    Tries all available keys in priority order; raises on total exhaustion.
+    Call an AI provider with automatic key rotation + provider failover.
+    Level 1: rotates through all keys of the requested provider.
+    Level 2: if all keys exhausted → tries next provider in fallback chain.
     """
     from services.key_rotator import call_with_rotation
 
     def _do_call(api_key: str) -> str:
+        # Store params as closure vars so the failover wrapper can read them
+        _model_id      = model_id       # noqa — referenced by failover wrapper
+        _system_prompt = system_prompt  # noqa
+        _user_prompt   = user_prompt    # noqa
+        _temperature   = temperature    # noqa
+        _max_tokens    = max_tokens     # noqa
+
         if provider == "gemini":
             return _call_gemini(api_key, model_id, system_prompt, user_prompt, temperature, max_tokens)
         elif provider == "cohere":

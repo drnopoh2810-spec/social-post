@@ -107,6 +107,17 @@ class Config(db.Model):
         'worker_url':                  'WORKER_URL',
         'pollinations_key':            'POLLINATIONS_KEY',
         'apyhub_token':                'APYHUB_TOKEN',
+        # ── Image Text Overlay ────────────────────────────────────────────────
+        'overlay_enabled':             'OVERLAY_ENABLED',
+        'overlay_text_source':         'OVERLAY_TEXT_SOURCE',   # ai | first_line | custom
+        'overlay_custom_text':         'OVERLAY_CUSTOM_TEXT',
+        'overlay_position':            'OVERLAY_POSITION',      # top|center|bottom + left|center|right
+        'overlay_font_size':           'OVERLAY_FONT_SIZE',
+        'overlay_font_color':          'OVERLAY_FONT_COLOR',
+        'overlay_bg_color':            'OVERLAY_BG_COLOR',
+        'overlay_bg_opacity':          'OVERLAY_BG_OPACITY',
+        'overlay_padding':             'OVERLAY_PADDING',
+        'overlay_max_chars':           'OVERLAY_MAX_CHARS',
 
         # ── Social platforms ──────────────────────────────────────────────────
         'fb_page_id':                  'FB_PAGE_ID',

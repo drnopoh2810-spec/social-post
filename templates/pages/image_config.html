@@ -3,7 +3,46 @@
 {% block content %}
 <div class="page-header">
   <div class="page-title">🎨 إعدادات الصور</div>
-  <div class="page-sub">تحكم في توليد الصور والأبعاد</div>
+  <div class="page-sub">توليد الصور بعدة مزودين مع fallback تلقائي</div>
+</div>
+
+<!-- Provider chain status -->
+<div class="card" style="margin-bottom:20px">
+  <div class="card-title">🔗 سلسلة توليد الصور (الترتيب التلقائي)</div>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0">
+    {% set chain = [
+      ('☁️','Cloudflare','worker_url',''),
+      ('🔵','Imagen 4','','gemini_image'),
+      ('🎨','Ideogram v3','','ideogram'),
+      ('🟢','OpenAI Image','','openai_image'),
+      ('🔷','Stability AI','','stability'),
+      ('🤗','HuggingFace','','huggingface'),
+      ('🔗','Together AI','','together'),
+      ('⚡','Fal.ai','','fal'),
+      ('🛩️','airforce','',''),
+      ('🌸','Pollinations','','')
+    ] %}
+    {% for icon, label, cfg_key, provider in chain %}
+    {% set has_key = (cfg_key and cfg.get(cfg_key)) or (provider and keys_by_provider.get(provider, [])|selectattr('is_active')|list|length > 0) or (not cfg_key and not provider) %}
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 14px;
+                border:1px solid {{ 'var(--green)' if has_key else 'var(--border)' }};
+                border-radius:8px;min-width:90px;opacity:{{ '1' if has_key else '0.5' }}">
+      <span style="font-size:20px">{{ icon }}</span>
+      <span style="font-size:11px;font-weight:700">{{ label }}</span>
+      <span style="font-size:10px;color:{{ 'var(--green)' if has_key else 'var(--text3)' }}">
+        {{ '✅ جاهز' if has_key else '⚠️ لا يوجد مفتاح' }}
+      </span>
+    </div>
+    {% if not loop.last %}
+    <span style="font-size:18px;color:var(--text3)">→</span>
+    {% endif %}
+    {% endfor %}
+  </div>
+  <div style="margin-top:10px;font-size:12px;color:var(--text3)">
+    💡 أضف مفاتيح الـ providers من صفحة
+    <a href="/ai-keys" style="color:var(--accent)">🗝️ مفاتيح AI</a>
+    — Pollinations يعمل دائماً بدون مفتاح كـ last fallback
+  </div>
 </div>
 
 <div class="grid-2">
@@ -14,39 +53,301 @@
       <div class="form-group"><label>الارتفاع (px)</label><input type="number" id="img-height" value="{{ cfg.get('image_height','1350') }}"></div>
     </div>
     <div class="form-group">
-      <label>نموذج توليد الصور</label>
+      <label>نموذج Pollinations (الـ fallback)</label>
       <select id="img-model">
-        <option value="flux" {{ 'selected' if cfg.get('image_model') == 'flux' }}>Flux 2 (Cloudflare Worker)</option>
-        <option value="pollinations" {{ 'selected' if cfg.get('image_model') == 'pollinations' }}>Pollinations (احتياطي)</option>
+        <option value="flux"   {{ 'selected' if cfg.get('image_model','flux') == 'flux' }}>Flux (أفضل جودة)</option>
+        <option value="turbo"  {{ 'selected' if cfg.get('image_model') == 'turbo' }}>Turbo (أسرع)</option>
+        <option value="gptimage" {{ 'selected' if cfg.get('image_model') == 'gptimage' }}>GPT Image</option>
       </select>
     </div>
+    <div class="form-group">
+      <label>نسبة الصور % (مقابل النصوص)</label>
+      <input type="range" id="img-ratio" min="0" max="100"
+             value="{{ cfg.get('image_ratio_percent','90') }}"
+             oninput="document.getElementById('ratio-val').textContent=this.value+'%'">
+      <span id="ratio-val" style="font-size:13px;color:var(--text2)">{{ cfg.get('image_ratio_percent','90') }}%</span>
+    </div>
   </div>
+
   <div class="card">
     <div class="card-title">🖼️ إعدادات الإطار</div>
-    <div class="form-group"><label>رابط الإطار</label><input type="url" id="frame-url" value="{{ cfg.get('frame_url','') }}"></div>
+    <div class="form-group"><label>رابط الإطار (PNG شفاف)</label>
+      <input type="url" id="frame-url" value="{{ cfg.get('frame_url','') }}" placeholder="https://...frame.png">
+    </div>
     <div class="form-group">
       <label>نسبة الشفافية %</label>
-      <input type="range" id="frame-opacity" min="0" max="100" value="{{ cfg.get('frame_opacity','100') }}" oninput="document.getElementById('opacity-val').textContent=this.value+'%'">
+      <input type="range" id="frame-opacity" min="0" max="100"
+             value="{{ cfg.get('frame_opacity','100') }}"
+             oninput="document.getElementById('opacity-val').textContent=this.value+'%'">
       <span id="opacity-val" style="font-size:13px;color:var(--text2)">{{ cfg.get('frame_opacity','100') }}%</span>
+    </div>
+    <div class="form-group">
+      <label>Cloudflare Worker URL</label>
+      <input type="url" id="worker-url" value="{{ cfg.get('worker_url','') }}" placeholder="https://your-worker.workers.dev">
     </div>
   </div>
 </div>
 
+<!-- Test image generation -->
+<div class="card">
+  <div class="card-title">🧪 اختبار توليد صورة</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <div class="form-group" style="flex:1;margin-bottom:0">
+      <label>برومبت تجريبي</label>
+      <input type="text" id="test-prompt" value="A child learning with colorful educational materials, warm light, documentary photography style" style="width:100%">
+    </div>
+    <button class="btn btn-secondary" onclick="testImage()" id="test-btn">🎨 توليد صورة تجريبية</button>
+  </div>
+  <div id="test-result" style="margin-top:14px;display:none">
+    <div id="test-status" style="font-size:13px;margin-bottom:10px"></div>
+    <img id="test-img" src="" style="max-width:300px;border-radius:8px;display:none">
+  </div>
+</div>
+
 <button class="btn btn-primary" onclick="saveImageConfig()">💾 حفظ إعدادات الصور</button>
+
+<!-- Text Overlay Settings -->
+<div class="card" style="margin-top:20px">
+  <div class="card-title">✍️ إعدادات النص على الصورة (Text Overlay)</div>
+  <div class="info-box" style="margin-bottom:16px">
+    💡 يضع نصاً عربياً (عنوان أو جملة تشويقية) على الصورة بعد الإطار.
+    الذكاء الاصطناعي يولد النص تلقائياً من المنشور.
+  </div>
+
+  <div class="form-group">
+    <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+      <input type="checkbox" id="overlay-enabled"
+             {{ 'checked' if cfg.get('overlay_enabled','false') == 'true' }}
+             onchange="toggleOverlay(this.checked)" style="width:18px;height:18px">
+      <span>تفعيل النص على الصورة</span>
+    </label>
+  </div>
+
+  <div id="overlay-settings" style="{{ 'display:none' if cfg.get('overlay_enabled','false') != 'true' else '' }}">
+    <div class="grid-2">
+      <div class="form-group">
+        <label>مصدر النص</label>
+        <select id="overlay-text-source" onchange="toggleCustomText()">
+          <option value="ai"         {{ 'selected' if cfg.get('overlay_text_source','ai') == 'ai' }}>🤖 AI يولد عنواناً تلقائياً</option>
+          <option value="first_line" {{ 'selected' if cfg.get('overlay_text_source') == 'first_line' }}>📝 أول سطر من المنشور</option>
+          <option value="custom"     {{ 'selected' if cfg.get('overlay_text_source') == 'custom' }}>✏️ نص ثابت مخصص</option>
+        </select>
+      </div>
+      <div class="form-group" id="custom-text-group"
+           style="{{ '' if cfg.get('overlay_text_source') == 'custom' else 'display:none' }}">
+        <label>النص المخصص</label>
+        <input type="text" id="overlay-custom-text"
+               value="{{ cfg.get('overlay_custom_text','') }}"
+               placeholder="اكتب النص الثابت هنا...">
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="form-group">
+        <label>موضع النص</label>
+        <select id="overlay-position">
+          {% set pos = cfg.get('overlay_position','bottom-center') %}
+          <option value="top-left"      {{ 'selected' if pos == 'top-left' }}>↖ أعلى يسار</option>
+          <option value="top-center"    {{ 'selected' if pos == 'top-center' }}>⬆ أعلى وسط</option>
+          <option value="top-right"     {{ 'selected' if pos == 'top-right' }}>↗ أعلى يمين</option>
+          <option value="center-left"   {{ 'selected' if pos == 'center-left' }}>← وسط يسار</option>
+          <option value="center"        {{ 'selected' if pos == 'center' }}>⊙ وسط</option>
+          <option value="center-right"  {{ 'selected' if pos == 'center-right' }}>→ وسط يمين</option>
+          <option value="bottom-left"   {{ 'selected' if pos == 'bottom-left' }}>↙ أسفل يسار</option>
+          <option value="bottom-center" {{ 'selected' if pos == 'bottom-center' }}>⬇ أسفل وسط</option>
+          <option value="bottom-right"  {{ 'selected' if pos == 'bottom-right' }}>↘ أسفل يمين</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>حجم الخط (px)</label>
+        <input type="number" id="overlay-font-size"
+               value="{{ cfg.get('overlay_font_size','52') }}" min="20" max="120">
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="form-group">
+        <label>لون النص</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="color" id="overlay-font-color"
+                 value="{{ cfg.get('overlay_font_color','#FFFFFF') }}"
+                 style="width:50px;height:36px;padding:2px;border-radius:6px">
+          <input type="text" id="overlay-font-color-hex"
+                 value="{{ cfg.get('overlay_font_color','#FFFFFF') }}"
+                 style="width:100px" oninput="syncColor('font')">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>لون خلفية النص</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="color" id="overlay-bg-color"
+                 value="{{ cfg.get('overlay_bg_color','#000000') }}"
+                 style="width:50px;height:36px;padding:2px;border-radius:6px">
+          <input type="text" id="overlay-bg-color-hex"
+                 value="{{ cfg.get('overlay_bg_color','#000000') }}"
+                 style="width:100px" oninput="syncColor('bg')">
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="form-group">
+        <label>شفافية الخلفية %
+          <span id="bg-opacity-val">{{ cfg.get('overlay_bg_opacity','60') }}%</span>
+        </label>
+        <input type="range" id="overlay-bg-opacity" min="0" max="100"
+               value="{{ cfg.get('overlay_bg_opacity','60') }}"
+               oninput="document.getElementById('bg-opacity-val').textContent=this.value+'%'">
+      </div>
+      <div class="form-group">
+        <label>Padding (px)</label>
+        <input type="number" id="overlay-padding"
+               value="{{ cfg.get('overlay_padding','20') }}" min="5" max="60">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>حد الأحرف للنص</label>
+      <input type="number" id="overlay-max-chars"
+             value="{{ cfg.get('overlay_max_chars','60') }}" min="20" max="150"
+             style="max-width:120px">
+    </div>
+
+    <!-- Preview -->
+    <div style="margin-top:16px">
+      <button class="btn btn-secondary" onclick="previewOverlay()" id="preview-btn">
+        👁️ معاينة النص على صورة تجريبية
+      </button>
+    </div>
+    <div id="overlay-preview" style="margin-top:12px;display:none">
+      <div id="overlay-preview-status" style="font-size:13px;margin-bottom:8px"></div>
+      <img id="overlay-preview-img" src="" style="max-width:320px;border-radius:8px;display:none">
+    </div>
+  </div>
+</div>
+
+<button class="btn btn-primary" onclick="saveAllImageConfig()" style="margin-top:16px">
+  💾 حفظ كل الإعدادات
+</button>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 function saveImageConfig(){
   const data = {
-    image_width: document.getElementById('img-width').value,
-    image_height: document.getElementById('img-height').value,
-    image_model: document.getElementById('img-model').value,
-    frame_url: document.getElementById('frame-url').value,
-    frame_opacity: document.getElementById('frame-opacity').value,
+    image_width:          document.getElementById('img-width').value,
+    image_height:         document.getElementById('img-height').value,
+    image_model:          document.getElementById('img-model').value,
+    image_ratio_percent:  document.getElementById('img-ratio').value,
+    frame_url:            document.getElementById('frame-url').value,
+    frame_opacity:        document.getElementById('frame-opacity').value,
+    worker_url:           document.getElementById('worker-url').value,
   };
-  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
-    .then(r=>r.json()).then(d=>{ if(d.ok) toast('✅ تم حفظ إعدادات الصور','green'); });
+  return fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
+    .then(r=>r.json());
+}
+
+function saveOverlayConfig(){
+  const data = {
+    overlay_enabled:     document.getElementById('overlay-enabled').checked ? 'true' : 'false',
+    overlay_text_source: document.getElementById('overlay-text-source').value,
+    overlay_custom_text: document.getElementById('overlay-custom-text')?.value || '',
+    overlay_position:    document.getElementById('overlay-position').value,
+    overlay_font_size:   document.getElementById('overlay-font-size').value,
+    overlay_font_color:  document.getElementById('overlay-font-color').value,
+    overlay_bg_color:    document.getElementById('overlay-bg-color').value,
+    overlay_bg_opacity:  document.getElementById('overlay-bg-opacity').value,
+    overlay_padding:     document.getElementById('overlay-padding').value,
+    overlay_max_chars:   document.getElementById('overlay-max-chars').value,
+  };
+  return fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
+    .then(r=>r.json());
+}
+
+async function saveAllImageConfig(){
+  const [r1, r2] = await Promise.all([saveImageConfig(), saveOverlayConfig()]);
+  if(r1.ok && r2.ok) toast('✅ تم حفظ كل الإعدادات','green');
+  else toast('❌ خطأ في الحفظ','red');
+}
+
+function toggleOverlay(checked){
+  document.getElementById('overlay-settings').style.display = checked ? '' : 'none';
+}
+function toggleCustomText(){
+  const src = document.getElementById('overlay-text-source').value;
+  document.getElementById('custom-text-group').style.display = src === 'custom' ? '' : 'none';
+}
+function syncColor(type){
+  const hex = document.getElementById(`overlay-${type}-color-hex`).value;
+  if(/^#[0-9A-Fa-f]{6}$/.test(hex)) document.getElementById(`overlay-${type}-color`).value = hex;
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('overlay-font-color')?.addEventListener('input',function(){
+    document.getElementById('overlay-font-color-hex').value = this.value;
+  });
+  document.getElementById('overlay-bg-color')?.addEventListener('input',function(){
+    document.getElementById('overlay-bg-color-hex').value = this.value;
+  });
+});
+
+async function previewOverlay(){
+  const btn = document.getElementById('preview-btn');
+  btn.disabled = true; btn.textContent = '⏳ جاري المعاينة...';
+  await saveOverlayConfig();
+  const prompt = document.getElementById('test-prompt').value ||
+    'A child learning with colorful educational materials, warm light';
+  document.getElementById('overlay-preview').style.display = 'block';
+  document.getElementById('overlay-preview-status').textContent = '⏳ جاري توليد الصورة مع النص...';
+  document.getElementById('overlay-preview-img').style.display = 'none';
+  fetch('/api/image/test-overlay',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body:JSON.stringify({prompt,
+      post_content:'هذا نص تجريبي للمنشور يحتوي على معلومات تعليمية مفيدة.',
+      idea:'فكرة تجريبية عن التعليم والتوعية'})
+  }).then(r=>r.json()).then(d=>{
+    btn.disabled=false; btn.textContent='👁️ معاينة النص على صورة تجريبية';
+    if(d.ok){
+      document.getElementById('overlay-preview-status').innerHTML=
+        `✅ عبر <strong>${d.provider}</strong> | النص: "<em>${d.overlay_text||'—'}</em>"`;
+      const img=document.getElementById('overlay-preview-img');
+      img.src=d.url; img.style.display='block';
+    } else document.getElementById('overlay-preview-status').innerHTML='❌ '+(d.error||'فشل');
+  }).catch(e=>{ btn.disabled=false; btn.textContent='👁️ معاينة'; });
+}
+
+function testImage(){
+  const btn = document.getElementById('test-btn');
+  const prompt = document.getElementById('test-prompt').value.trim();
+  if(!prompt){ toast('أدخل برومبت أولاً','red'); return; }
+
+  btn.disabled = true; btn.textContent = '⏳ جاري التوليد...';
+  document.getElementById('test-result').style.display = 'block';
+  document.getElementById('test-status').textContent = '⏳ جاري توليد الصورة...';
+  document.getElementById('test-img').style.display = 'none';
+
+  fetch('/api/image/test', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body: JSON.stringify({prompt})
+  })
+  .then(r=>r.json())
+  .then(d=>{
+    btn.disabled = false; btn.textContent = '🎨 توليد صورة تجريبية';
+    if(d.ok){
+      document.getElementById('test-status').innerHTML =
+        `✅ تم التوليد عبر <strong>${d.provider}</strong>`;
+      const img = document.getElementById('test-img');
+      img.src = d.url;
+      img.style.display = 'block';
+    } else {
+      document.getElementById('test-status').innerHTML = '❌ ' + (d.error||'فشل التوليد');
+    }
+  })
+  .catch(e=>{
+    btn.disabled = false; btn.textContent = '🎨 توليد صورة تجريبية';
+    document.getElementById('test-status').textContent = '❌ خطأ: ' + e;
+  });
 }
 </script>
 {% endblock %}

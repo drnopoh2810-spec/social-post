@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-header">
   <div class="page-title">🕐 جدول النشر</div>
-  <div class="page-sub">تخصيص مواعيد النشر اليومية</div>
+  <div class="page-sub">مواعيد النشر + إعداد PythonAnywhere Scheduled Tasks</div>
 </div>
 
 <div class="card">
@@ -24,7 +24,46 @@
   </div>
 </div>
 
-<button class="btn btn-primary" onclick="saveScheduler()">💾 حفظ الجدول</button>
+<button class="btn btn-primary" onclick="saveScheduler()" style="margin-bottom:24px">💾 حفظ الجدول</button>
+
+<!-- PA Scheduled Tasks -->
+<div class="card">
+  <div class="card-title">⚙️ PythonAnywhere Scheduled Tasks</div>
+  <div class="info-box" style="margin-bottom:16px">
+    💡 الـ free plan يسمح بـ <strong>2 tasks فقط</strong>.<br>
+    الـ tasks تشتغل حتى لو التطبيق نايم — أفضل من APScheduler على PA.<br>
+    <strong>Task 1:</strong> توليد الأفكار (08:00) &nbsp;|&nbsp;
+    <strong>Task 2:</strong> نشر المنشورات (09:00)
+  </div>
+
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+    <button class="btn btn-primary" onclick="setupPATasks()">🚀 إعداد Tasks تلقائياً</button>
+    <button class="btn btn-secondary" onclick="listPATasks()">📋 عرض Tasks الحالية</button>
+    <button class="btn btn-secondary" onclick="syncSheets()">🔄 مزامنة من Google Sheets الآن</button>
+  </div>
+
+  <div id="pa-tasks-result" style="display:none" class="info-box"></div>
+
+  <div id="pa-tasks-list" style="display:none;margin-top:12px">
+    <div class="card-title" style="font-size:13px">Tasks الحالية:</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>الأمر</th><th>الوقت</th><th>الحالة</th></tr></thead>
+        <tbody id="tasks-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Manual run -->
+<div class="card">
+  <div class="card-title">▶️ تشغيل يدوي</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <button class="btn btn-secondary" onclick="runNow('ideas')">🧠 توليد أفكار الآن</button>
+    <button class="btn btn-secondary" onclick="runNow('post')">📢 نشر منشور الآن</button>
+  </div>
+  <div id="run-result" style="margin-top:12px;display:none" class="info-box"></div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -39,6 +78,71 @@ function saveScheduler(){
   };
   fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
     .then(r=>r.json()).then(d=>{ if(d.ok) toast('✅ تم حفظ الجدول','green'); });
+}
+
+function setupPATasks(){
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = '⏳ جاري الإعداد...';
+  fetch('/api/pa-tasks/setup',{method:'POST',headers:{'X-CSRFToken':getCsrf()}})
+    .then(r=>r.json()).then(d=>{
+      btn.disabled = false; btn.textContent = '🚀 إعداد Tasks تلقائياً';
+      const el = document.getElementById('pa-tasks-result');
+      el.style.display = 'block';
+      if(d.ok){
+        let html = '';
+        if(d.created.length) html += '✅ تم إنشاء:<br>' + d.created.map(t=>`• ${t}`).join('<br>') + '<br>';
+        if(d.skipped.length) html += '⏭️ موجودة مسبقاً:<br>' + d.skipped.map(t=>`• ${t}`).join('<br>') + '<br>';
+        if(d.errors.length)  html += '❌ أخطاء:<br>' + d.errors.map(t=>`• ${t}`).join('<br>') + '<br>';
+        if(d.note) html += `<br><small style="color:#888">${d.note}</small>`;
+        el.innerHTML = html || '✅ تم';
+      } else {
+        el.innerHTML = '❌ ' + (d.error || 'خطأ غير معروف');
+      }
+    });
+}
+
+function listPATasks(){
+  fetch('/api/pa-tasks/list')
+    .then(r=>r.json()).then(d=>{
+      const panel = document.getElementById('pa-tasks-list');
+      const tbody = document.getElementById('tasks-tbody');
+      panel.style.display = 'block';
+      if(!d.ok || !d.tasks.length){
+        tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#888">لا توجد tasks</td></tr>';
+        return;
+      }
+      tbody.innerHTML = d.tasks.map(t=>`
+        <tr>
+          <td style="font-size:12px;font-family:monospace">${t.command||''}</td>
+          <td>${String(t.hour||0).padStart(2,'0')}:${String(t.minute||0).padStart(2,'0')}</td>
+          <td><span class="badge ${t.enabled?'badge-green':'badge-red'}">${t.enabled?'✅ مفعّل':'❌ معطّل'}</span></td>
+        </tr>`).join('');
+    });
+}
+
+function syncSheets(){
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = '⏳ جاري المزامنة...';
+  fetch('/api/sheets/sync',{method:'POST',headers:{'X-CSRFToken':getCsrf()}})
+    .then(r=>r.json()).then(d=>{
+      btn.disabled = false; btn.textContent = '🔄 مزامنة من Google Sheets الآن';
+      const el = document.getElementById('pa-tasks-result');
+      el.style.display = 'block';
+      el.innerHTML = d.ok ? d.message : '❌ ' + d.error;
+    });
+}
+
+function runNow(type){
+  const btn = event.target;
+  btn.disabled = true;
+  const url = type === 'ideas' ? '/api/workflow/ideas' : '/api/workflow/post';
+  fetch(url, {method:'POST', headers:{'X-CSRFToken':getCsrf()}})
+    .then(r=>r.json()).then(d=>{
+      btn.disabled = false;
+      const el = document.getElementById('run-result');
+      el.style.display = 'block';
+      el.innerHTML = d.ok ? '✅ ' + (d.message||'تم التشغيل') : '❌ ' + (d.error||'خطأ');
+    });
 }
 </script>
 {% endblock %}

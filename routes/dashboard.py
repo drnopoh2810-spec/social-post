@@ -35,6 +35,18 @@ def index():
 def posts():
     status = request.args.get('status', 'ALL')
     q = request.args.get('q', '')
+
+    # Auto-sync from Google Sheets on every page load (fast, non-blocking)
+    try:
+        from services.sheets_sync import sync_from_sheets_to_db, is_configured
+        if is_configured():
+            ins, upd = sync_from_sheets_to_db()
+            if ins or upd:
+                import logging
+                logging.getLogger(__name__).info(f"Posts page: synced {ins} new, {upd} updated from Sheets")
+    except Exception:
+        pass
+
     query = Post.query
     if status != 'ALL':
         query = query.filter_by(status=status)
@@ -119,8 +131,14 @@ def platforms_page():
 @dashboard_bp.route('/image-config')
 @login_required
 def image_config():
+    from database.models import AIProviderKey
     cfg = {row.key: row.value for row in Config.query.all()}
-    return render_template('pages/image_config.html', cfg=cfg)
+    img_providers = ['huggingface', 'together', 'fal']
+    keys_by_provider = {
+        p: AIProviderKey.query.filter_by(provider=p).order_by(AIProviderKey.priority).all()
+        for p in img_providers
+    }
+    return render_template('pages/image_config.html', cfg=cfg, keys_by_provider=keys_by_provider)
 
 
 @dashboard_bp.route('/scheduler')
@@ -141,13 +159,23 @@ def telegram_page():
 @login_required
 def ai_keys_page():
     from database.models import AIProviderKey
-    providers = ['cohere', 'gemini', 'groq', 'openrouter', 'openai']
+    # AI text providers
+    ai_providers = ['cohere', 'gemini', 'groq', 'openrouter', 'airforce', 'openai']
+    # Image providers
+    img_providers = ['gemini_image', 'huggingface', 'together', 'fal',
+                     'pollinations', 'ideogram', 'openai_image', 'stability']
+    all_providers = ai_providers + img_providers
     keys_by_provider = {}
-    for p in providers:
+    for p in all_providers:
         keys_by_provider[p] = AIProviderKey.query.filter_by(provider=p).order_by(
             AIProviderKey.priority.asc(), AIProviderKey.id.asc()
         ).all()
-    return render_template('pages/ai_keys.html', keys_by_provider=keys_by_provider, providers=providers)
+    from services.image_service import IMAGE_PROVIDERS_INFO
+    return render_template('pages/ai_keys.html',
+                           keys_by_provider=keys_by_provider,
+                           providers=ai_providers,
+                           img_providers=img_providers,
+                           img_providers_info=IMAGE_PROVIDERS_INFO)
 
 
 @dashboard_bp.route('/db')

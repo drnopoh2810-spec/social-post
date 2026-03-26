@@ -2,97 +2,239 @@
 {% block title %}التحليلات{% endblock %}
 {% block content %}
 <div class="page-header">
-  <div class="page-title">📈 التحليلات والأداء</div>
-  <div class="page-sub">تحليل أداء المنشورات والتعلم من النجاحات</div>
+  <div class="page-title">📊 التحليلات والأداء</div>
+  <div class="page-sub">تحليل أداء المنشورات على جميع المنصات</div>
 </div>
 
-<div class="grid-3" style="margin-bottom:20px">
-  <div class="stat-card purple"><div class="stat-label">متوسط Engagement Score</div><div class="stat-value">{{ avg or '—' }}</div></div>
-  <div class="stat-card green"><div class="stat-label">أفضل نبرة</div><div class="stat-value" style="font-size:16px;margin-top:4px">{{ best_tone }}</div></div>
-  <div class="stat-card blue"><div class="stat-label">أفضل أسلوب</div><div class="stat-value" style="font-size:16px;margin-top:4px">{{ best_style }}</div></div>
+<!-- Controls -->
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;align-items:center">
+  <select id="days-filter" onchange="loadAnalytics()" style="width:160px">
+    <option value="7">آخر 7 أيام</option>
+    <option value="30" selected>آخر 30 يوم</option>
+    <option value="90">آخر 90 يوم</option>
+    <option value="365">آخر سنة</option>
+  </select>
+  <button class="btn btn-secondary btn-sm" onclick="refreshAll()" id="refresh-btn">
+    🔄 تحديث Metrics من المنصات
+  </button>
+  <span id="refresh-status" style="font-size:12px;color:var(--text3)"></span>
 </div>
 
-<div class="grid-2">
+<!-- Summary Cards -->
+<div class="grid-4" id="summary-cards" style="margin-bottom:24px">
+  <div class="stat-card" id="card-posts"><div class="stat-label">📝 منشورات</div><div class="stat-value" id="val-posts">—</div></div>
+  <div class="stat-card" id="card-likes"><div class="stat-label">👍 إعجابات</div><div class="stat-value" id="val-likes">—</div></div>
+  <div class="stat-card" id="card-comments"><div class="stat-label">💬 تعليقات</div><div class="stat-value" id="val-comments">—</div></div>
+  <div class="stat-card" id="card-shares"><div class="stat-label">🔁 مشاركات</div><div class="stat-value" id="val-shares">—</div></div>
+</div>
+
+<div class="grid-2" style="margin-bottom:24px">
+  <!-- Best performing -->
   <div class="card">
-    <div class="card-title">🏆 أفضل 5 منشورات أداءً</div>
-    {% if top5 %}
-      {% for p in top5 %}
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
-        <span style="font-size:18px;font-weight:900;color:var(--accent2)">#{{ loop.index }}</span>
-        <div style="flex:1">
-          <div style="font-size:13px;color:var(--text);margin-bottom:3px">{{ (p.idea or '')[:60] }}...</div>
-          <div style="font-size:11px;color:var(--text3)">{{ p.tone or '' }} | {{ p.writing_style or '' }}</div>
-        </div>
-        <span class="badge badge-green">{{ p.engagement_score }}</span>
-      </div>
-      {% endfor %}
-    {% else %}
-      <div class="empty-state"><div class="empty-icon">📊</div><div class="empty-title">لا توجد بيانات بعد</div></div>
-    {% endif %}
+    <div class="card-title">🏆 أفضل أسلوب كتابة</div>
+    <div id="best-style" style="font-size:28px;font-weight:900;color:var(--accent);padding:8px 0">—</div>
+    <div style="font-size:12px;color:var(--text3)">بناءً على متوسط الـ engagement score</div>
+    <div class="card-title" style="margin-top:16px">🎭 أفضل نبرة</div>
+    <div id="best-tone" style="font-size:28px;font-weight:900;color:var(--accent2);padding:8px 0">—</div>
   </div>
+
+  <!-- Style breakdown -->
   <div class="card">
-    <div class="card-title">📉 أضعف 5 منشورات</div>
-    {% if bottom5 %}
-      {% for p in bottom5 %}
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
-        <span style="font-size:18px;font-weight:900;color:var(--red)">#{{ loop.index }}</span>
-        <div style="flex:1">
-          <div style="font-size:13px;color:var(--text);margin-bottom:3px">{{ (p.idea or '')[:60] }}...</div>
-          <div style="font-size:11px;color:var(--text3)">{{ p.tone or '' }}</div>
-        </div>
-        <span class="badge badge-red">{{ p.engagement_score }}</span>
-      </div>
-      {% endfor %}
-    {% else %}
-      <div class="empty-state"><div class="empty-icon">📊</div><div class="empty-title">لا توجد بيانات بعد</div></div>
-    {% endif %}
+    <div class="card-title">📈 أداء أساليب الكتابة</div>
+    <div id="style-chart" style="min-height:120px"></div>
   </div>
 </div>
 
+<!-- Daily trend -->
+<div class="card" style="margin-bottom:24px">
+  <div class="card-title">📅 النشاط اليومي</div>
+  <div id="daily-chart" style="min-height:80px;display:flex;align-items:flex-end;gap:4px;padding:8px 0"></div>
+</div>
+
+<!-- Top posts -->
 <div class="card">
-  <div class="card-title">📊 تسجيل بيانات Engagement</div>
-  <div class="info-box">💡 أدخل بيانات أداء المنشورات من Facebook Insights لتحليلها وتحسين الأفكار القادمة</div>
-  <div class="grid-2">
-    <div class="form-group">
-      <label>اختر المنشور</label>
-      <select id="eng-post">
-        {% for p in all_posted %}
-        <option value="{{ p.id }}">{{ p.id }} — {{ (p.idea or '')[:50] }}</option>
-        {% else %}
-        <option>لا توجد منشورات منشورة</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Engagement Score (0-100)</label>
-      <input type="number" id="eng-score" min="0" max="100" placeholder="75">
-    </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div class="card-title" style="margin-bottom:0">🥇 أفضل المنشورات أداءً</div>
   </div>
-  <div class="grid-3">
-    <div class="form-group"><label>Likes</label><input type="number" id="eng-likes" placeholder="0"></div>
-    <div class="form-group"><label>Comments</label><input type="number" id="eng-comments" placeholder="0"></div>
-    <div class="form-group"><label>Shares</label><input type="number" id="eng-shares" placeholder="0"></div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>الفكرة</th><th>الأسلوب</th>
+          <th>👍</th><th>💬</th><th>🔁</th><th>Score</th>
+          <th>التاريخ</th><th>تحديث</th>
+        </tr>
+      </thead>
+      <tbody id="top-posts-tbody">
+        <tr><td colspan="9" style="text-align:center;color:var(--text3)">⏳ جاري التحميل...</td></tr>
+      </tbody>
+    </table>
   </div>
-  <button class="btn btn-primary" onclick="saveEngagement()">💾 حفظ بيانات الأداء</button>
+</div>
+
+<!-- All posted posts with refresh buttons -->
+<div class="card" style="margin-top:20px">
+  <div class="card-title">📋 كل المنشورات المنشورة</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>#</th><th>الفكرة</th><th>👍</th><th>💬</th><th>🔁</th><th>Score</th><th>التاريخ</th><th></th></tr>
+      </thead>
+      <tbody id="all-posts-tbody">
+        <tr><td colspan="8" style="text-align:center;color:var(--text3)">⏳ جاري التحميل...</td></tr>
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-function saveEngagement(){
-  const postId = document.getElementById('eng-post').value;
-  if(!postId || isNaN(postId)){ toast('اختر منشوراً','red'); return; }
-  fetch('/api/engagement',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
-    body:JSON.stringify({
-      post_id:parseInt(postId),
-      score:parseInt(document.getElementById('eng-score').value)||0,
-      likes:parseInt(document.getElementById('eng-likes').value)||0,
-      comments:parseInt(document.getElementById('eng-comments').value)||0,
-      shares:parseInt(document.getElementById('eng-shares').value)||0,
-    })
-  }).then(r=>r.json()).then(d=>{ if(d.ok){ toast('✅ تم حفظ بيانات الأداء','green'); setTimeout(()=>location.reload(),1000); } });
+let analyticsData = null;
+
+async function loadAnalytics(){
+  const days = document.getElementById('days-filter').value;
+  const r = await fetch(`/api/analytics/summary?days=${days}`);
+  const d = await r.json();
+  if(!d.ok) return;
+  analyticsData = d;
+
+  const s = d.summary;
+  document.getElementById('val-posts').textContent    = s.total_posts || 0;
+  document.getElementById('val-likes').textContent    = (s.total_likes||0).toLocaleString();
+  document.getElementById('val-comments').textContent = (s.total_comments||0).toLocaleString();
+  document.getElementById('val-shares').textContent   = (s.total_shares||0).toLocaleString();
+  document.getElementById('best-style').textContent   = s.best_style || '—';
+  document.getElementById('best-tone').textContent    = s.best_tone  || '—';
+
+  renderStyleChart(d.style_avg || {});
+  renderDailyChart(d.daily || {});
+  renderTopPosts(d.top_posts || []);
+  await loadAllPosts();
 }
+
+function renderStyleChart(styleAvg){
+  const el = document.getElementById('style-chart');
+  if(!Object.keys(styleAvg).length){ el.innerHTML='<div style="color:var(--text3);font-size:13px">لا توجد بيانات بعد</div>'; return; }
+  const max = Math.max(...Object.values(styleAvg));
+  el.innerHTML = Object.entries(styleAvg)
+    .sort((a,b)=>b[1]-a[1])
+    .map(([style, score])=>`
+      <div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+          <span>${style}</span><span style="color:var(--accent)">${score}</span>
+        </div>
+        <div style="background:var(--bg3);border-radius:4px;height:8px">
+          <div style="background:var(--accent);height:8px;border-radius:4px;width:${Math.round(score/max*100)}%;transition:width .5s"></div>
+        </div>
+      </div>`).join('');
+}
+
+function renderDailyChart(daily){
+  const el = document.getElementById('daily-chart');
+  const entries = Object.entries(daily).sort((a,b)=>a[0].localeCompare(b[0])).slice(-30);
+  if(!entries.length){ el.innerHTML='<div style="color:var(--text3);font-size:13px">لا توجد بيانات</div>'; return; }
+  const maxCount = Math.max(...entries.map(e=>e[1].count));
+  el.innerHTML = entries.map(([day, data])=>`
+    <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;min-width:20px" title="${day}: ${data.count} منشور">
+      <div style="font-size:9px;color:var(--text3)">${data.count}</div>
+      <div style="background:var(--accent);border-radius:3px 3px 0 0;width:100%;
+                  height:${Math.max(4, Math.round(data.count/maxCount*60))}px;
+                  opacity:0.8;transition:height .3s"></div>
+      <div style="font-size:8px;color:var(--text3);writing-mode:vertical-rl;transform:rotate(180deg)">
+        ${day.slice(5)}
+      </div>
+    </div>`).join('');
+}
+
+function renderTopPosts(posts){
+  const tbody = document.getElementById('top-posts-tbody');
+  if(!posts.length){
+    tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--text3)">لا توجد منشورات بعد</td></tr>';
+    return;
+  }
+  tbody.innerHTML = posts.map((p,i)=>`
+    <tr>
+      <td><span style="font-size:18px">${['🥇','🥈','🥉','4️⃣','5️⃣'][i]||i+1}</span></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${p.idea||''}">
+        ${(p.idea||'').slice(0,50)}
+      </td>
+      <td style="font-size:12px">${p.writing_style||'—'}</td>
+      <td>${p.likes||0}</td>
+      <td>${p.comments||0}</td>
+      <td>${p.shares||0}</td>
+      <td><span class="badge badge-purple">${p.engagement_score||0}</span></td>
+      <td style="font-size:12px;color:var(--text3)">${(p.posted_at||'').slice(0,10)}</td>
+      <td><button class="btn btn-secondary btn-sm" onclick="refreshPost(${p.id})">🔄</button></td>
+    </tr>`).join('');
+}
+
+async function loadAllPosts(){
+  const r = await fetch('/api/posts?status=POSTED');
+  const posts = await r.json();
+  const tbody = document.getElementById('all-posts-tbody');
+  if(!posts.length){
+    tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--text3)">لا توجد منشورات</td></tr>';
+    return;
+  }
+  tbody.innerHTML = posts.slice(0,50).map(p=>`
+    <tr id="row-${p.id}">
+      <td><code>${p.id}</code></td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(p.idea||'').slice(0,45)}</td>
+      <td id="likes-${p.id}">${p.likes||0}</td>
+      <td id="comments-${p.id}">${p.comments||0}</td>
+      <td id="shares-${p.id}">${p.shares||0}</td>
+      <td id="score-${p.id}"><span class="badge badge-purple">${p.engagement_score||0}</span></td>
+      <td style="font-size:12px;color:var(--text3)">${(p.posted_at||'').slice(0,10)}</td>
+      <td><button class="btn btn-secondary btn-sm" onclick="refreshPost(${p.id})" id="btn-${p.id}">🔄</button></td>
+    </tr>`).join('');
+}
+
+async function refreshPost(postId){
+  const btn = document.getElementById(`btn-${postId}`);
+  if(btn){ btn.disabled=true; btn.textContent='⏳'; }
+  try {
+    const r = await fetch(`/api/analytics/refresh/${postId}`, {
+      method:'POST', headers:{'X-CSRFToken':getCsrf()}
+    });
+    const d = await r.json();
+    if(d.ok){
+      const t = d.totals || {};
+      if(document.getElementById(`likes-${postId}`))    document.getElementById(`likes-${postId}`).textContent    = t.likes||0;
+      if(document.getElementById(`comments-${postId}`)) document.getElementById(`comments-${postId}`).textContent = t.comments||0;
+      if(document.getElementById(`shares-${postId}`))   document.getElementById(`shares-${postId}`).textContent   = t.shares||0;
+      if(document.getElementById(`score-${postId}`))    document.getElementById(`score-${postId}`).innerHTML      = `<span class="badge badge-purple">${d.score||0}</span>`;
+      toast(`✅ تم تحديث #${postId}`, 'green');
+    } else {
+      toast(`⚠️ ${d.error||'لا توجد بيانات'}`, 'orange');
+    }
+  } catch(e){ toast('❌ خطأ', 'red'); }
+  finally { if(btn){ btn.disabled=false; btn.textContent='🔄'; } }
+}
+
+async function refreshAll(){
+  const btn = document.getElementById('refresh-btn');
+  const status = document.getElementById('refresh-status');
+  btn.disabled=true; btn.textContent='⏳ جاري التحديث...';
+  status.textContent = 'يتم جلب البيانات من المنصات...';
+  try {
+    const r = await fetch('/api/analytics/refresh-all', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+      body: JSON.stringify({limit:30})
+    });
+    const d = await r.json();
+    if(d.ok){
+      status.textContent = `✅ تم تحديث ${d.updated} منشور`;
+      await loadAnalytics();
+    } else {
+      status.textContent = '❌ ' + (d.error||'خطأ');
+    }
+  } catch(e){ status.textContent = '❌ خطأ في الاتصال'; }
+  finally { btn.disabled=false; btn.textContent='🔄 تحديث Metrics من المنصات'; }
+}
+
+// Load on page open
+loadAnalytics();
 </script>
 {% endblock %}

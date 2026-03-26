@@ -3,85 +3,266 @@
 {% block content %}
 <div class="page-header">
   <div class="page-title">🤖 نماذج الذكاء الاصطناعي</div>
-  <div class="page-sub">تحكم في أي نموذج يُستخدم لكل مرحلة</div>
+  <div class="page-sub">تحكم في أي نموذج يُستخدم لكل مرحلة — النماذج تُجلب تلقائياً من المفتاح</div>
 </div>
 
-<div class="info-box">
-  💡 <strong>المجاني المتاح:</strong> Cohere (command-r7b-arabic-02-2025 | command-r-08-2024 | command-r-plus-08-2024) • Google Gemini (gemini-1.5-flash | gemini-2.0-flash-exp) • Groq (llama-3.1-8b-instant)
+<div class="info-box" id="info-box">
+  💡 اختر المزود وسيتم جلب النماذج المتاحة فعلياً من مفتاحك تلقائياً.
+  النماذج المجانية مميزة بـ ⭐
 </div>
 
 {% set stage_labels = {
-  'idea_factory': '🧠 مصنع الأفكار',
-  'post_writer': '✍️ كاتب المنشورات',
-  'image_prompt': '🎨 كاتب برومبت الصور',
-  'ig_caption': '📷 كابشن Instagram',
-  'x_caption': '𝕏 كابشن Twitter/X',
+  'idea_factory':    '🧠 مصنع الأفكار',
+  'post_writer':     '✍️ كاتب المنشورات',
+  'image_prompt':    '🎨 كاتب برومبت الصور',
+  'ig_caption':      '📷 كابشن Instagram',
+  'x_caption':       '𝕏 كابشن Twitter/X',
   'threads_caption': '🔗 كابشن Threads',
-  'linkedin_caption': '💼 كابشن LinkedIn'
+  'linkedin_caption':'💼 كابشن LinkedIn'
 } %}
 
-{% set provider_models = {
-  'cohere': ['command-r7b-arabic-02-2025','command-r-08-2024','command-r-plus-08-2024'],
-  'gemini': ['gemini-1.5-flash','gemini-1.5-flash-8b','gemini-2.0-flash-exp'],
-  'groq': ['llama-3.1-8b-instant','llama-3.3-70b-versatile','mixtral-8x7b-32768'],
-  'openai': ['gpt-4o-mini','gpt-4o','gpt-3.5-turbo']
-} %}
-
+<div id="stages-container">
 {% for m in models %}
-<div class="card" style="margin-bottom:14px">
+<div class="card" style="margin-bottom:14px" id="card-{{ m.stage }}">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
     <div class="card-title" style="margin-bottom:0">{{ stage_labels.get(m.stage, m.stage) }}</div>
-    <span class="badge badge-purple">{{ m.model_id }}</span>
+    <span class="badge badge-purple" id="badge-{{ m.stage }}">{{ m.model_id }}</span>
   </div>
   <div class="grid-2">
     <div class="form-group" style="margin-bottom:0">
       <label>المزود (Provider)</label>
-      <select id="provider-{{ m.stage }}" onchange="updateModelOptions('{{ m.stage }}')">
-        <option value="cohere" {{ 'selected' if m.provider == 'cohere' }}>🟡 Cohere (مجاني)</option>
-        <option value="gemini" {{ 'selected' if m.provider == 'gemini' }}>🔵 Google Gemini (مجاني)</option>
-        <option value="groq" {{ 'selected' if m.provider == 'groq' }}>🟢 Groq (مجاني سريع)</option>
-        <option value="openai" {{ 'selected' if m.provider == 'openai' }}>⚫ OpenAI (مدفوع)</option>
+      <select id="provider-{{ m.stage }}" onchange="loadModels('{{ m.stage }}')">
+        <option value="cohere"     {{ 'selected' if m.provider == 'cohere' }}>🟡 Cohere</option>
+        <option value="gemini"     {{ 'selected' if m.provider == 'gemini' }}>🔵 Google Gemini</option>
+        <option value="groq"       {{ 'selected' if m.provider == 'groq' }}>🟢 Groq</option>
+        <option value="openrouter" {{ 'selected' if m.provider == 'openrouter' }}>🟠 OpenRouter</option>
+        <option value="airforce"   {{ 'selected' if m.provider == 'airforce' }}>🛩️ api.airforce (مجاني)</option>
+        <option value="openai"     {{ 'selected' if m.provider == 'openai' }}>⚫ OpenAI</option>
       </select>
     </div>
     <div class="form-group" style="margin-bottom:0">
-      <label>النموذج</label>
+      <label>
+        النموذج
+        <span id="source-{{ m.stage }}" style="font-size:11px;color:#888;margin-right:6px"></span>
+      </label>
       <select id="model-{{ m.stage }}">
-        {% for mid in provider_models.get(m.provider, []) %}
-        <option value="{{ mid }}" {{ 'selected' if m.model_id == mid }}>{{ mid }}</option>
-        {% endfor %}
+        <option value="{{ m.model_id }}">{{ m.model_id }}</option>
       </select>
     </div>
   </div>
 </div>
 {% endfor %}
+</div>
 
-<button class="btn btn-primary" onclick="saveModels()">💾 حفظ اختيارات النماذج</button>
+<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+  <button class="btn btn-primary" onclick="saveModels()">💾 حفظ اختيارات النماذج</button>
+  <button class="btn btn-secondary" onclick="refreshAllModels()" id="refresh-btn">🔄 تحديث النماذج من API</button>
+  <button class="btn btn-secondary" onclick="setAllProvider()" id="set-all-btn">⚡ تطبيق مزود واحد على الكل</button>
+</div>
+
+<!-- Set all provider modal -->
+<div id="set-all-panel" style="display:none;margin-top:14px" class="card">
+  <div class="card-title">⚡ تطبيق مزود واحد على كل المراحل</div>
+  <div class="grid-2">
+    <div class="form-group">
+      <label>المزود</label>
+      <select id="all-provider">
+        <option value="gemini">🔵 Google Gemini (مجاني ⭐)</option>
+        <option value="cohere">🟡 Cohere (مجاني)</option>
+        <option value="groq">🟢 Groq (مجاني سريع)</option>
+        <option value="openrouter">🟠 OpenRouter (مجاني)</option>
+        <option value="airforce">🛩️ api.airforce (مجاني)</option>
+        <option value="openai">⚫ OpenAI (مدفوع)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>النموذج</label>
+      <select id="all-model"><option>جاري التحميل...</option></select>
+    </div>
+  </div>
+  <button class="btn btn-primary" onclick="applyAllProvider()">✅ تطبيق على الكل</button>
+  <button class="btn btn-secondary" onclick="document.getElementById('set-all-panel').style.display='none'">إلغاء</button>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-const providerModels = {
-  cohere:['command-r7b-arabic-02-2025','command-r-08-2024','command-r-plus-08-2024'],
-  gemini:['gemini-1.5-flash','gemini-1.5-flash-8b','gemini-2.0-flash-exp'],
-  groq:['llama-3.1-8b-instant','llama-3.3-70b-versatile','mixtral-8x7b-32768'],
-  openai:['gpt-4o-mini','gpt-4o','gpt-3.5-turbo']
-};
-const stages = {{ models | map(attribute='stage') | list | tojson }};
+// Current model data per stage
+const stageData = {{ models | map(attribute='stage') | list | tojson }};
+const currentModels = {};
+{% for m in models %}
+currentModels['{{ m.stage }}'] = { provider: '{{ m.provider }}', model_id: '{{ m.model_id }}' };
+{% endfor %}
 
-function updateModelOptions(stage){
-  const provider = document.getElementById('provider-'+stage).value;
-  const sel = document.getElementById('model-'+stage);
-  sel.innerHTML = (providerModels[provider]||[]).map(m=>`<option value="${m}">${m}</option>`).join('');
+// Cache fetched models per provider
+const modelCache = {};
+
+async function fetchModels(provider) {
+  if (modelCache[provider]) return modelCache[provider];
+  try {
+    const r = await fetch(`/api/models/list?provider=${provider}`);
+    const data = await r.json();
+    if (data.ok && data.models.length > 0) {
+      modelCache[provider] = data;
+      return data;
+    }
+  } catch(e) {}
+  return { ok: false, models: [], source: 'static', has_key: false };
 }
 
-function saveModels(){
-  const data = stages.map(stage=>({
+async function loadModels(stage, keepCurrent = true) {
+  const provider = document.getElementById('provider-' + stage).value;
+  const sel = document.getElementById('model-' + stage);
+  const srcLabel = document.getElementById('source-' + stage);
+  const badge = document.getElementById('badge-' + stage);
+
+  // Show loading
+  sel.innerHTML = '<option>⏳ جاري الجلب...</option>';
+  sel.disabled = true;
+
+  const data = await fetchModels(provider);
+
+  sel.disabled = false;
+  sel.innerHTML = '';
+
+  if (data.models.length === 0) {
+    sel.innerHTML = '<option value="">لا توجد نماذج — أضف مفتاح API أولاً</option>';
+    srcLabel.textContent = '(لا يوجد مفتاح)';
+    srcLabel.style.color = '#e74c3c';
+    return;
+  }
+
+  // Source indicator
+  if (data.source === 'live') {
+    srcLabel.textContent = `✅ مباشر (${data.models.length} نموذج)`;
+    srcLabel.style.color = '#27ae60';
+  } else {
+    srcLabel.textContent = data.has_key ? '⚠️ قائمة افتراضية' : '🔑 أضف مفتاح للجلب المباشر';
+    srcLabel.style.color = '#f39c12';
+  }
+
+  // Populate options — free models first with star
+  const currentVal = keepCurrent ? currentModels[stage]?.model_id : null;
+  let selectedSet = false;
+
+  data.models.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    const freeTag = m.free ? ' ⭐' : '';
+    opt.textContent = m.name.includes('(') ? m.name + freeTag.trim() : m.id + freeTag;
+    if (currentVal && m.id === currentVal) {
+      opt.selected = true;
+      selectedSet = true;
+    }
+    sel.appendChild(opt);
+  });
+
+  // If current model not in list, add it as first option
+  if (!selectedSet && currentVal) {
+    const opt = document.createElement('option');
+    opt.value = currentVal;
+    opt.textContent = currentVal + ' (محفوظ)';
+    opt.selected = true;
+    sel.insertBefore(opt, sel.firstChild);
+  }
+
+  // Update badge
+  badge.textContent = sel.value;
+  sel.onchange = () => { badge.textContent = sel.value; };
+}
+
+async function refreshAllModels() {
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري التحديث...';
+
+  // Clear cache
+  Object.keys(modelCache).forEach(k => delete modelCache[k]);
+
+  for (const stage of stageData) {
+    await loadModels(stage, true);
+  }
+
+  btn.disabled = false;
+  btn.textContent = '🔄 تحديث النماذج من API';
+  toast('✅ تم تحديث النماذج', 'green');
+}
+
+function setAllProvider() {
+  const panel = document.getElementById('set-all-panel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  if (panel.style.display === 'block') {
+    loadAllProviderModels();
+  }
+}
+
+async function loadAllProviderModels() {
+  const provider = document.getElementById('all-provider').value;
+  const sel = document.getElementById('all-model');
+  sel.innerHTML = '<option>⏳ جاري الجلب...</option>';
+  const data = await fetchModels(provider);
+  sel.innerHTML = '';
+  (data.models || []).forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.name || m.id;
+    sel.appendChild(opt);
+  });
+}
+
+document.getElementById('all-provider').addEventListener('change', loadAllProviderModels);
+
+async function applyAllProvider() {
+  const provider = document.getElementById('all-provider').value;
+  const model = document.getElementById('all-model').value;
+  if (!model) { toast('اختر نموذجاً أولاً', 'red'); return; }
+
+  for (const stage of stageData) {
+    document.getElementById('provider-' + stage).value = provider;
+    // Update cache entry
+    currentModels[stage] = { provider, model_id: model };
+    await loadModels(stage, false);
+    // Force select the chosen model
+    const sel = document.getElementById('model-' + stage);
+    for (let i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value === model) { sel.selectedIndex = i; break; }
+    }
+    document.getElementById('badge-' + stage).textContent = model;
+  }
+
+  document.getElementById('set-all-panel').style.display = 'none';
+  toast(`✅ تم تطبيق ${provider} / ${model} على كل المراحل`, 'green');
+}
+
+function saveModels() {
+  const data = stageData.map(stage => ({
     stage,
-    provider: document.getElementById('provider-'+stage)?.value,
-    model_id: document.getElementById('model-'+stage)?.value,
-  }));
-  fetch('/api/models',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
-    .then(r=>r.json()).then(d=>{ if(d.ok) toast('✅ تم حفظ النماذج','green'); });
+    provider: document.getElementById('provider-' + stage)?.value,
+    model_id: document.getElementById('model-' + stage)?.value,
+  })).filter(d => d.model_id && d.model_id !== '');
+
+  fetch('/api/models', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+    body: JSON.stringify(data)
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) {
+      toast('✅ تم حفظ النماذج', 'green');
+      // Update currentModels cache
+      data.forEach(d => { currentModels[d.stage] = { provider: d.provider, model_id: d.model_id }; });
+    } else {
+      toast('❌ خطأ في الحفظ', 'red');
+    }
+  });
 }
+
+// Load models for all stages on page load
+(async () => {
+  for (const stage of stageData) {
+    await loadModels(stage, true);
+  }
+})();
 </script>
 {% endblock %}

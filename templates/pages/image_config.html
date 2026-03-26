@@ -415,7 +415,15 @@ function saveImageConfig(){
     worker_url:           document.getElementById('worker-url').value,
   };
   return fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
-    .then(r=>r.json());
+    .then(r=>r.json())
+    .then(d => {
+      toast('✅ تم حفظ إعدادات الصور','green');
+      return d;
+    })
+    .catch(e => {
+      toast('❌ خطأ في حفظ إعدادات الصور','red');
+      throw e;
+    });
 }
 
 function saveOverlayConfig(){
@@ -439,7 +447,15 @@ function saveOverlayConfig(){
     overlay_offset_x:     document.getElementById('overlay-offset-x').value,
   };
   return fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
-    .then(r=>r.json());
+    .then(r=>r.json())
+    .then(d => {
+      toast('✅ تم حفظ إعدادات النص على الصورة','green');
+      return d;
+    })
+    .catch(e => {
+      toast('❌ خطأ في حفظ إعدادات النص','red');
+      throw e;
+    });
 }
 
 function adjustOffset(axis, delta){
@@ -458,9 +474,14 @@ function toggleShadowSettings(checked){
 }
 
 async function saveAllImageConfig(){
-  const [r1, r2] = await Promise.all([saveImageConfig(), saveOverlayConfig()]);
-  if(r1.ok && r2.ok) toast('✅ تم حفظ كل الإعدادات','green');
-  else toast('❌ خطأ في الحفظ','red');
+  try {
+    const [r1, r2] = await Promise.all([saveImageConfig(), saveOverlayConfig()]);
+    // r1 and r2 are already JSON objects from .then(r=>r.json())
+    toast('✅ تم حفظ كل الإعدادات','green');
+  } catch(e) {
+    console.error('Save error:', e);
+    toast('❌ خطأ في الحفظ: ' + e.message,'red');
+  }
 }
 
 function toggleOverlay(checked){

@@ -545,7 +545,7 @@ def generate_image_pollinations(prompt, model="flux", width=1080, height=1350,
 
 def upload_to_cloudinary(image_bytes, cloud_name, api_key, api_secret,
                           folder="social_posts"):
-    """Upload image bytes to Cloudinary. ORIGINAL — unchanged."""
+    """Upload image bytes to Cloudinary. Returns (secure_url, public_id)."""
     import hashlib
     ts = int(time.time())
     sig = hashlib.sha1(
@@ -562,12 +562,46 @@ def upload_to_cloudinary(image_bytes, cloud_name, api_key, api_secret,
     resp = r.json()
     if "error" in resp:
         raise ValueError(f"Cloudinary: {resp['error']['message']}")
-    return resp.get("secure_url") or resp.get("url")
+    url       = resp.get("secure_url") or resp.get("url")
+    public_id = resp.get("public_id", "")
+    return url, public_id
+
+
+def delete_from_cloudinary(public_id: str, cloud_name: str,
+                            api_key: str, api_secret: str) -> bool:
+    """
+    Delete an image from Cloudinary by public_id.
+    Called after successful publishing to free up storage.
+    Returns True on success.
+    """
+    if not public_id or not cloud_name:
+        return False
+    try:
+        import hashlib
+        ts  = int(time.time())
+        sig = hashlib.sha1(
+            (f"public_id={public_id}&timestamp={ts}" + api_secret).encode()
+        ).hexdigest()
+        r = requests.post(
+            f"https://api.cloudinary.com/v1_1/{cloud_name}/image/destroy",
+            data={"public_id": public_id, "api_key": api_key,
+                  "timestamp": ts, "signature": sig},
+            timeout=30,
+        )
+        result = r.json().get("result", "")
+        if result == "ok":
+            logger.info(f"Cloudinary: deleted {public_id}")
+            return True
+        logger.warning(f"Cloudinary delete returned: {result} for {public_id}")
+        return False
+    except Exception as e:
+        logger.warning(f"Cloudinary delete failed for {public_id}: {e}")
+        return False
 
 
 def overlay_frame_cloudinary(base_url, frame_url, cloud_name, api_key, api_secret,
                               width=1080, height=1350, folder="social_posts"):
-    """Overlay frame on image and re-upload. ORIGINAL — unchanged."""
+    """Overlay frame on image and re-upload. Returns (url, public_id)."""
     from PIL import Image
     base_bytes  = requests.get(base_url, timeout=60).content
     frame_bytes = requests.get(frame_url, timeout=60).content
@@ -695,16 +729,24 @@ def process_image(post_data, cfg):
             "cloudinary_api_key, cloudinary_api_secret in /config"
         )
 
-    base_url = upload_to_cloudinary(image_bytes, cloud_name, api_key, api_secret)
+    base_url, base_pid = upload_to_cloudinary(image_bytes, cloud_name, api_key, api_secret)
     logger.info(f"Uploaded: {base_url}")
+
+    # Track all intermediate public_ids for cleanup
+    intermediate_pids = []
 
     # Overlay frame
     if frame_url and frame_url not in ("", "YOUR_FRAME_IMAGE_URL"):
         try:
-            base_url = overlay_frame_cloudinary(
+            framed_url, framed_pid = overlay_frame_cloudinary(
                 base_url, frame_url, cloud_name, api_key, api_secret, width, height
             )
-            logger.info(f"Frame overlaid: {base_url}")
+            logger.info(f"Frame overlaid: {framed_url}")
+            # Delete the base (pre-frame) image — no longer needed
+            if base_pid:
+                intermediate_pids.append(base_pid)
+            base_url = framed_url
+            base_pid = framed_pid
         except Exception as e:
             logger.warning(f"Frame overlay failed: {e}")
 
@@ -717,15 +759,25 @@ def process_image(post_data, cfg):
             img_bytes = requests.get(base_url, timeout=30).content
             overlaid  = process_overlay(img_bytes, post_content, idea)
             if overlaid != img_bytes:
-                base_url = upload_to_cloudinary(
+                overlay_url, overlay_pid = upload_to_cloudinary(
                     overlaid, cloud_name, api_key, api_secret,
                     folder="social_posts_overlay"
                 )
-                logger.info(f"Text overlay applied: {base_url}")
+                logger.info(f"Text overlay applied: {overlay_url}")
+                # Delete the pre-text-overlay image
+                if base_pid:
+                    intermediate_pids.append(base_pid)
+                base_url = overlay_url
+                base_pid = overlay_pid
     except Exception as e:
         logger.warning(f"Text overlay failed (using base image): {e}")
 
-    return base_url
+    # Clean up intermediate images (frame-only, pre-overlay versions)
+    for pid in intermediate_pids:
+        delete_from_cloudinary(pid, cloud_name, api_key, api_secret)
+
+    # Return final URL and public_id so workflow can delete after publishing
+    return base_url, base_pid
 
 
 # ── Provider info (for UI) ────────────────────────────────────────────────────

@@ -3,62 +3,105 @@ Image Text Overlay Service
 ===========================
 يضع نص عربي على الصورة بعد الـ frame overlay.
 
-Flow:
-  صورة مولّدة → frame overlay → text overlay → رفع Cloudinary
-
-الإعدادات (من Config DB):
-  overlay_enabled      : true/false
-  overlay_text_source  : ai | first_line | custom
-  overlay_custom_text  : نص ثابت (لو source=custom)
-  overlay_position     : top-left | top-center | top-right |
-                         center-left | center | center-right |
-                         bottom-left | bottom-center | bottom-right
-  overlay_font_size    : حجم الخط (px) — default 52
-  overlay_font_color   : لون النص hex — default #FFFFFF
-  overlay_bg_color     : لون خلفية النص hex — default #000000
-  overlay_bg_opacity   : شفافية الخلفية 0-100 — default 60
-  overlay_padding      : padding حول النص (px) — default 20
-  overlay_max_chars    : حد الأحرف للنص — default 60
+الإعدادات الجديدة:
+  overlay_font_name    : noto_naskh | noto_kufi | cairo | amiri | tajawal
+  overlay_show_bg      : true/false — إظهار خلفية النص
+  overlay_show_shadow  : true/false — إظهار ظل النص
+  overlay_shadow_color : لون الظل hex — default #000000
+  overlay_shadow_offset: إزاحة الظل (px) — default 3
 """
 
 import io
 import logging
 import os
 import re
-import textwrap
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# ── Arabic font path ──────────────────────────────────────────────────────────
-# يبحث عن خط عربي مثبّت أو يستخدم fallback
-_FONT_CANDIDATES = [
-    # Linux / PythonAnywhere
-    "/usr/share/fonts/truetype/arabic/NotoNaskhArabic-Regular.ttf",
-    "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+# ── الـ 5 فونتات العربية المدعومة ────────────────────────────────────────────
+# اسم الخط → اسم الملف في static/fonts/ أو مسارات النظام
+
+FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "fonts")
+
+ARABIC_FONTS = {
+    "noto_naskh": {
+        "label": "Noto Naskh Arabic — نسخ كلاسيكي",
+        "files": [
+            os.path.join(FONTS_DIR, "NotoNaskhArabic-Regular.ttf"),
+            os.path.join(FONTS_DIR, "NotoNaskhArabic-Bold.ttf"),
+            "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+            "/usr/share/fonts/truetype/arabic/NotoNaskhArabic-Regular.ttf",
+        ],
+    },
+    "noto_kufi": {
+        "label": "Noto Kufi Arabic — كوفي عصري",
+        "files": [
+            os.path.join(FONTS_DIR, "NotoKufiArabic-Regular.ttf"),
+            os.path.join(FONTS_DIR, "NotoKufiArabic-Bold.ttf"),
+            "/usr/share/fonts/truetype/noto/NotoKufiArabic-Regular.ttf",
+        ],
+    },
+    "cairo": {
+        "label": "Cairo — عصري وواضح",
+        "files": [
+            os.path.join(FONTS_DIR, "Cairo-Regular.ttf"),
+            os.path.join(FONTS_DIR, "Cairo-Bold.ttf"),
+            os.path.join(FONTS_DIR, "Cairo-SemiBold.ttf"),
+        ],
+    },
+    "amiri": {
+        "label": "Amiri — أميري تقليدي",
+        "files": [
+            os.path.join(FONTS_DIR, "Amiri-Regular.ttf"),
+            os.path.join(FONTS_DIR, "Amiri-Bold.ttf"),
+            "/usr/share/fonts/truetype/fonts-hosny-amiri/Amiri-Regular.ttf",
+        ],
+    },
+    "tajawal": {
+        "label": "Tajawal — تجوال بسيط",
+        "files": [
+            os.path.join(FONTS_DIR, "Tajawal-Regular.ttf"),
+            os.path.join(FONTS_DIR, "Tajawal-Bold.ttf"),
+            os.path.join(FONTS_DIR, "Tajawal-Medium.ttf"),
+        ],
+    },
+}
+
+# Fallback system fonts
+_SYSTEM_FALLBACKS = [
     "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
     "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    # macOS
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-    # Windows
     "C:/Windows/Fonts/arial.ttf",
     "C:/Windows/Fonts/tahoma.ttf",
-    # Project-local (يمكن وضع خط في static/fonts/)
-    os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "fonts", "arabic.ttf"),
-    os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "fonts", "NotoNaskhArabic-Regular.ttf"),
 ]
 
 
-def _get_font_path() -> str | None:
-    for p in _FONT_CANDIDATES:
-        if p and os.path.isfile(p):
-            return p
+def _resolve_font(font_name: str) -> str | None:
+    """Find the font file path for a given font name."""
+    font_info = ARABIC_FONTS.get(font_name)
+    if font_info:
+        for path in font_info["files"]:
+            if path and os.path.isfile(path):
+                return path
+    # Fallback to any available system font
+    for path in _SYSTEM_FALLBACKS:
+        if os.path.isfile(path):
+            return path
     return None
 
 
+def get_available_fonts() -> dict:
+    """Return dict of font_name → {label, available} for UI."""
+    result = {}
+    for name, info in ARABIC_FONTS.items():
+        available = any(os.path.isfile(p) for p in info["files"] if p)
+        result[name] = {"label": info["label"], "available": available}
+    return result
+
+
 def _hex_to_rgba(hex_color: str, opacity: int = 100) -> tuple:
-    """Convert #RRGGBB + opacity% → (R, G, B, A)."""
     hex_color = hex_color.lstrip("#")
     if len(hex_color) == 3:
         hex_color = "".join(c * 2 for c in hex_color)
@@ -74,36 +117,39 @@ def _get_overlay_cfg() -> dict:
     try:
         from database.models import Config
         return {
-            "enabled":     Config.get("overlay_enabled", "false").lower() == "true",
-            "text_source": Config.get("overlay_text_source", "ai"),
-            "custom_text": Config.get("overlay_custom_text", ""),
-            "position":    Config.get("overlay_position", "bottom-center"),
-            "font_size":   int(Config.get("overlay_font_size", "52") or 52),
-            "font_color":  Config.get("overlay_font_color", "#FFFFFF"),
-            "bg_color":    Config.get("overlay_bg_color", "#000000"),
-            "bg_opacity":  int(Config.get("overlay_bg_opacity", "60") or 60),
-            "padding":     int(Config.get("overlay_padding", "20") or 20),
-            "max_chars":   int(Config.get("overlay_max_chars", "60") or 60),
+            "enabled":       Config.get("overlay_enabled", "false").lower() == "true",
+            "text_source":   Config.get("overlay_text_source", "ai"),
+            "custom_text":   Config.get("overlay_custom_text", ""),
+            "position":      Config.get("overlay_position", "bottom-center"),
+            "font_name":     Config.get("overlay_font_name", "cairo"),
+            "font_size":     int(Config.get("overlay_font_size", "52") or 52),
+            "font_color":    Config.get("overlay_font_color", "#FFFFFF"),
+            # Background
+            "show_bg":       Config.get("overlay_show_bg", "true").lower() == "true",
+            "bg_color":      Config.get("overlay_bg_color", "#000000"),
+            "bg_opacity":    int(Config.get("overlay_bg_opacity", "60") or 60),
+            "padding":       int(Config.get("overlay_padding", "20") or 20),
+            # Shadow
+            "show_shadow":   Config.get("overlay_show_shadow", "true").lower() == "true",
+            "shadow_color":  Config.get("overlay_shadow_color", "#000000"),
+            "shadow_offset": int(Config.get("overlay_shadow_offset", "3") or 3),
+            # Text
+            "max_chars":     int(Config.get("overlay_max_chars", "60") or 60),
         }
     except Exception:
         return {
             "enabled": False, "text_source": "ai", "custom_text": "",
-            "position": "bottom-center", "font_size": 52,
-            "font_color": "#FFFFFF", "bg_color": "#000000",
-            "bg_opacity": 60, "padding": 20, "max_chars": 60,
+            "position": "bottom-center", "font_name": "cairo", "font_size": 52,
+            "font_color": "#FFFFFF", "show_bg": True, "bg_color": "#000000",
+            "bg_opacity": 60, "padding": 20, "show_shadow": True,
+            "shadow_color": "#000000", "shadow_offset": 3, "max_chars": 60,
         }
 
 
 def generate_overlay_text(post_content: str, idea: str, provider: str = None) -> str:
-    """
-    Generate a short teaser/title for the image overlay using AI.
-    Falls back to extracting first line of post_content.
-    """
+    """Generate a short teaser/title for the image overlay using AI."""
     try:
         from services.ai_service import call_ai
-        from database.models import Config
-
-        niche = Config.get("niche", "")
         system = "أنت متخصص في كتابة عناوين جذابة وقصيرة للسوشال ميديا."
         user = (
             f"اكتب عنواناً أو جملة تشويقية قصيرة جداً (بحد أقصى 8 كلمات) "
@@ -111,18 +157,14 @@ def generate_overlay_text(post_content: str, idea: str, provider: str = None) ->
             f"الفكرة: {idea[:200]}\n\n"
             f"أول جزء من المنشور:\n{post_content[:300]}\n\n"
             f"القواعد:\n"
-            f"- بالعربية فقط\n"
-            f"- بدون علامات اقتباس\n"
-            f"- بدون هاشتاق\n"
-            f"- جملة واحدة فقط\n"
-            f"- مثيرة للاهتمام وتشجع على القراءة\n\n"
+            f"- بالعربية فقط\n- بدون علامات اقتباس\n- بدون هاشتاق\n"
+            f"- جملة واحدة فقط\n- مثيرة للاهتمام وتشجع على القراءة\n\n"
             f"الناتج: الجملة فقط بدون أي نص إضافي"
         )
         result = call_ai(
             provider or "gemini", "gemini-2.0-flash",
             system, user, temperature=0.7, max_tokens=50
         )
-        # Clean result
         result = result.strip().strip('"\'').strip()
         result = re.sub(r'[#@]', '', result).strip()
         return result[:80] if result else ""
@@ -132,34 +174,25 @@ def generate_overlay_text(post_content: str, idea: str, provider: str = None) ->
 
 
 def _extract_first_line(post_content: str, max_chars: int = 60) -> str:
-    """Extract first meaningful line from post content."""
     if not post_content:
         return ""
     lines = [l.strip() for l in post_content.split('\n') if l.strip()]
     for line in lines:
-        # Skip lines that are just emojis or hashtags
         clean = re.sub(r'[#@\U0001F300-\U0001FFFF]', '', line).strip()
         if len(clean) > 10:
             return line[:max_chars]
     return lines[0][:max_chars] if lines else ""
 
 
-def _wrap_arabic_text(text: str, max_width_chars: int = 25) -> list[str]:
-    """
-    Wrap Arabic text into lines.
-    Arabic is RTL so we wrap by character count.
-    """
+def _wrap_arabic_text(text: str, max_width_chars: int = 25) -> list:
     if not text:
         return []
     words = text.split()
-    lines = []
-    current = []
-    current_len = 0
+    lines, current, current_len = [], [], 0
     for word in words:
         if current_len + len(word) + 1 > max_width_chars and current:
             lines.append(" ".join(current))
-            current = [word]
-            current_len = len(word)
+            current, current_len = [word], len(word)
         else:
             current.append(word)
             current_len += len(word) + 1
@@ -169,17 +202,7 @@ def _wrap_arabic_text(text: str, max_width_chars: int = 25) -> list[str]:
 
 
 def apply_text_overlay(image_bytes: bytes, text: str, cfg: dict = None) -> bytes:
-    """
-    Apply Arabic text overlay on image using Pillow.
-
-    Args:
-        image_bytes: Raw image bytes
-        text: Text to overlay
-        cfg: Overlay config dict (from _get_overlay_cfg())
-
-    Returns:
-        Modified image bytes (JPEG)
-    """
+    """Apply Arabic text overlay on image using Pillow."""
     from PIL import Image, ImageDraw, ImageFont
 
     if not text or not text.strip():
@@ -188,29 +211,25 @@ def apply_text_overlay(image_bytes: bytes, text: str, cfg: dict = None) -> bytes
     if cfg is None:
         cfg = _get_overlay_cfg()
 
-    # Open image
     img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
     W, H = img.size
 
-    # Load font
-    font_path = _get_font_path()
+    # ── Load font ─────────────────────────────────────────────────────────────
+    font_path = _resolve_font(cfg.get("font_name", "cairo"))
     font_size = cfg["font_size"]
     try:
-        if font_path:
-            font = ImageFont.truetype(font_path, font_size)
-        else:
-            font = ImageFont.load_default()
-            logger.warning("No Arabic font found — using default font (Arabic may not render correctly)")
+        font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
     except Exception:
         font = ImageFont.load_default()
+        logger.warning(f"Font '{cfg.get('font_name')}' not found — using default")
 
-    # Wrap text
+    # ── Wrap text ─────────────────────────────────────────────────────────────
     max_chars_per_line = max(10, int(W / (font_size * 0.6)))
     lines = _wrap_arabic_text(text, max_chars_per_line)
 
-    # Measure text block
-    padding = cfg["padding"]
-    draw_tmp = ImageDraw.Draw(img)
+    # ── Measure text block ────────────────────────────────────────────────────
+    padding      = cfg["padding"] if cfg["show_bg"] else 0
+    draw_tmp     = ImageDraw.Draw(img)
     line_heights = []
     line_widths  = []
     for line in lines:
@@ -222,115 +241,80 @@ def apply_text_overlay(image_bytes: bytes, text: str, cfg: dict = None) -> bytes
     block_w = max(line_widths) + padding * 2
     block_h = sum(line_heights) + line_spacing * (len(lines) - 1) + padding * 2
 
-    # Calculate position
-    position = cfg["position"]  # e.g. "bottom-center"
-    parts = position.split("-")
-    v_pos = parts[0] if len(parts) > 0 else "bottom"
+    # ── Calculate position ────────────────────────────────────────────────────
+    parts = cfg["position"].split("-")
+    v_pos = parts[0] if parts else "bottom"
     h_pos = parts[1] if len(parts) > 1 else "center"
+    margin = int(H * 0.04)
 
-    margin = int(H * 0.04)  # 4% margin from edges
+    x = margin if h_pos == "left" else (W - block_w - margin if h_pos == "right" else (W - block_w) // 2)
+    y = margin if v_pos == "top" else ((H - block_h) // 2 if v_pos == "center" else H - block_h - margin)
 
-    if h_pos == "left":
-        x = margin
-    elif h_pos == "right":
-        x = W - block_w - margin
-    else:  # center
-        x = (W - block_w) // 2
+    # ── Draw background ───────────────────────────────────────────────────────
+    if cfg["show_bg"] and cfg["bg_opacity"] > 0:
+        overlay_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        draw_bg = ImageDraw.Draw(overlay_layer)
+        bg_rgba = _hex_to_rgba(cfg["bg_color"], cfg["bg_opacity"])
+        try:
+            draw_bg.rounded_rectangle([x, y, x + block_w, y + block_h], radius=12, fill=bg_rgba)
+        except AttributeError:
+            draw_bg.rectangle([x, y, x + block_w, y + block_h], fill=bg_rgba)
+        img = Image.alpha_composite(img, overlay_layer)
 
-    if v_pos == "top":
-        y = margin
-    elif v_pos == "center":
-        y = (H - block_h) // 2
-    else:  # bottom
-        y = H - block_h - margin
-
-    # Draw background rectangle
-    overlay_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay_layer)
-
-    bg_rgba = _hex_to_rgba(cfg["bg_color"], cfg["bg_opacity"])
-    # Rounded rectangle (Pillow 9+)
-    try:
-        draw.rounded_rectangle(
-            [x, y, x + block_w, y + block_h],
-            radius=12, fill=bg_rgba
-        )
-    except AttributeError:
-        draw.rectangle([x, y, x + block_w, y + block_h], fill=bg_rgba)
-
-    # Composite background
-    img = Image.alpha_composite(img, overlay_layer)
     draw = ImageDraw.Draw(img)
+    text_color   = _hex_to_rgba(cfg["font_color"], 100)
+    shadow_color = _hex_to_rgba(cfg.get("shadow_color", "#000000"), 200)
+    shadow_off   = cfg.get("shadow_offset", 3)
+    current_y    = y + padding
 
-    # Draw text lines
-    text_color = _hex_to_rgba(cfg["font_color"], 100)
-    current_y = y + padding
-    for i, line in enumerate(lines):
+    for line in lines:
         bbox = draw.textbbox((0, 0), line, font=font)
         lw = bbox[2] - bbox[0]
         lh = bbox[3] - bbox[1]
 
-        # Horizontal alignment within block
-        if h_pos == "left":
-            tx = x + padding
-        elif h_pos == "right":
-            tx = x + block_w - lw - padding
-        else:
-            tx = x + (block_w - lw) // 2
+        tx = (x + padding if h_pos == "left"
+              else x + block_w - lw - padding if h_pos == "right"
+              else x + (block_w - lw) // 2)
 
-        # Draw text shadow for readability
-        shadow_color = (0, 0, 0, 180)
-        draw.text((tx + 2, current_y + 2), line, font=font, fill=shadow_color)
+        # ── Draw shadow ───────────────────────────────────────────────────────
+        if cfg["show_shadow"] and shadow_off > 0:
+            draw.text((tx + shadow_off, current_y + shadow_off), line,
+                      font=font, fill=shadow_color)
+
+        # ── Draw text ─────────────────────────────────────────────────────────
         draw.text((tx, current_y), line, font=font, fill=text_color)
-
         current_y += lh + line_spacing
 
-    # Convert back to RGB JPEG
-    result = img.convert("RGB")
     out = io.BytesIO()
-    result.save(out, format="JPEG", quality=92)
+    img.convert("RGB").save(out, format="JPEG", quality=92)
     return out.getvalue()
 
 
 def process_overlay(image_bytes: bytes, post_content: str, idea: str,
                     provider: str = None) -> bytes:
-    """
-    Main entry point — called from image pipeline.
-    Generates text (via AI or extraction) then applies overlay.
-
-    Returns original image_bytes if overlay is disabled or fails.
-    """
+    """Main entry point — called from image pipeline."""
     try:
         cfg = _get_overlay_cfg()
-
         if not cfg["enabled"]:
             return image_bytes
 
-        # Get text based on source
         text = ""
         source = cfg["text_source"]
-
         if source == "custom" and cfg["custom_text"]:
             text = cfg["custom_text"][:cfg["max_chars"]]
-
         elif source == "first_line":
             text = _extract_first_line(post_content, cfg["max_chars"])
-
-        else:  # ai (default)
+        else:
             text = generate_overlay_text(post_content, idea, provider)
             if not text:
-                # Fallback to first line
                 text = _extract_first_line(post_content, cfg["max_chars"])
 
         if not text:
-            logger.info("Overlay: no text generated — skipping")
             return image_bytes
 
-        logger.info(f"Overlay: applying text '{text[:50]}' at {cfg['position']}")
-        result = apply_text_overlay(image_bytes, text, cfg)
-        logger.info("Overlay: text applied successfully")
-        return result
+        logger.info(f"Overlay: '{text[:50]}' | font={cfg['font_name']} | pos={cfg['position']} | bg={cfg['show_bg']} | shadow={cfg['show_shadow']}")
+        return apply_text_overlay(image_bytes, text, cfg)
 
     except Exception as e:
         logger.warning(f"Overlay failed (returning original): {e}")
-        return image_bytes  # Never break the pipeline
+        return image_bytes

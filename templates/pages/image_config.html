@@ -110,8 +110,7 @@
 <div class="card" style="margin-top:20px">
   <div class="card-title">✍️ إعدادات النص على الصورة (Text Overlay)</div>
   <div class="info-box" style="margin-bottom:16px">
-    💡 يضع نصاً عربياً (عنوان أو جملة تشويقية) على الصورة بعد الإطار.
-    الذكاء الاصطناعي يولد النص تلقائياً من المنشور.
+    💡 يضع نصاً عربياً على الصورة بعد الإطار. الذكاء الاصطناعي يولد النص تلقائياً.
   </div>
 
   <div class="form-group">
@@ -119,11 +118,13 @@
       <input type="checkbox" id="overlay-enabled"
              {{ 'checked' if cfg.get('overlay_enabled','false') == 'true' }}
              onchange="toggleOverlay(this.checked)" style="width:18px;height:18px">
-      <span>تفعيل النص على الصورة</span>
+      <span style="font-weight:700">تفعيل النص على الصورة</span>
     </label>
   </div>
 
   <div id="overlay-settings" style="{{ 'display:none' if cfg.get('overlay_enabled','false') != 'true' else '' }}">
+
+    <!-- Row 1: Text source + custom text -->
     <div class="grid-2">
       <div class="form-group">
         <label>مصدر النص</label>
@@ -142,7 +143,22 @@
       </div>
     </div>
 
+    <!-- Row 2: Font + position -->
     <div class="grid-2">
+      <div class="form-group">
+        <label>الخط العربي</label>
+        <select id="overlay-font-name">
+          {% set fn = cfg.get('overlay_font_name','cairo') %}
+          <option value="cairo"      {{ 'selected' if fn == 'cairo' }}>Cairo — عصري وواضح ⭐</option>
+          <option value="noto_naskh" {{ 'selected' if fn == 'noto_naskh' }}>Noto Naskh — نسخ كلاسيكي</option>
+          <option value="noto_kufi"  {{ 'selected' if fn == 'noto_kufi' }}>Noto Kufi — كوفي عصري</option>
+          <option value="amiri"      {{ 'selected' if fn == 'amiri' }}>Amiri — أميري تقليدي</option>
+          <option value="tajawal"    {{ 'selected' if fn == 'tajawal' }}>Tajawal — تجوال بسيط</option>
+        </select>
+        <div id="font-status" style="font-size:11px;margin-top:4px;color:var(--text3)">
+          ⏳ جاري التحقق من الخطوط...
+        </div>
+      </div>
       <div class="form-group">
         <label>موضع النص</label>
         <select id="overlay-position">
@@ -154,18 +170,19 @@
           <option value="center"        {{ 'selected' if pos == 'center' }}>⊙ وسط</option>
           <option value="center-right"  {{ 'selected' if pos == 'center-right' }}>→ وسط يمين</option>
           <option value="bottom-left"   {{ 'selected' if pos == 'bottom-left' }}>↙ أسفل يسار</option>
-          <option value="bottom-center" {{ 'selected' if pos == 'bottom-center' }}>⬇ أسفل وسط</option>
+          <option value="bottom-center" {{ 'selected' if pos == 'bottom-center' }}>⬇ أسفل وسط ⭐</option>
           <option value="bottom-right"  {{ 'selected' if pos == 'bottom-right' }}>↘ أسفل يمين</option>
         </select>
       </div>
+    </div>
+
+    <!-- Row 3: Font size + color -->
+    <div class="grid-2">
       <div class="form-group">
         <label>حجم الخط (px)</label>
         <input type="number" id="overlay-font-size"
                value="{{ cfg.get('overlay_font_size','52') }}" min="20" max="120">
       </div>
-    </div>
-
-    <div class="grid-2">
       <div class="form-group">
         <label>لون النص</label>
         <div style="display:flex;gap:8px;align-items:center">
@@ -177,35 +194,87 @@
                  style="width:100px" oninput="syncColor('font')">
         </div>
       </div>
-      <div class="form-group">
-        <label>لون خلفية النص</label>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input type="color" id="overlay-bg-color"
-                 value="{{ cfg.get('overlay_bg_color','#000000') }}"
-                 style="width:50px;height:36px;padding:2px;border-radius:6px">
-          <input type="text" id="overlay-bg-color-hex"
-                 value="{{ cfg.get('overlay_bg_color','#000000') }}"
-                 style="width:100px" oninput="syncColor('bg')">
+    </div>
+
+    <!-- Row 4: Background toggle -->
+    <div class="card" style="background:var(--bg3);margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-weight:700">🟫 خلفية النص</div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="overlay-show-bg"
+                 {{ 'checked' if cfg.get('overlay_show_bg','true') == 'true' }}
+                 onchange="toggleBgSettings(this.checked)"
+                 style="width:16px;height:16px">
+          <span>تفعيل الخلفية</span>
+        </label>
+      </div>
+      <div id="bg-settings" style="{{ 'display:none' if cfg.get('overlay_show_bg','true') != 'true' else '' }}">
+        <div class="grid-2">
+          <div class="form-group" style="margin-bottom:0">
+            <label>لون الخلفية</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="color" id="overlay-bg-color"
+                     value="{{ cfg.get('overlay_bg_color','#000000') }}"
+                     style="width:50px;height:36px;padding:2px;border-radius:6px">
+              <input type="text" id="overlay-bg-color-hex"
+                     value="{{ cfg.get('overlay_bg_color','#000000') }}"
+                     style="width:100px" oninput="syncColor('bg')">
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>شفافية الخلفية %
+              <span id="bg-opacity-val">{{ cfg.get('overlay_bg_opacity','60') }}%</span>
+            </label>
+            <input type="range" id="overlay-bg-opacity" min="0" max="100"
+                   value="{{ cfg.get('overlay_bg_opacity','60') }}"
+                   oninput="document.getElementById('bg-opacity-val').textContent=this.value+'%'">
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:10px;margin-bottom:0">
+          <label>Padding حول النص (px)</label>
+          <input type="number" id="overlay-padding"
+                 value="{{ cfg.get('overlay_padding','20') }}" min="5" max="60"
+                 style="max-width:100px">
         </div>
       </div>
     </div>
 
-    <div class="grid-2">
-      <div class="form-group">
-        <label>شفافية الخلفية %
-          <span id="bg-opacity-val">{{ cfg.get('overlay_bg_opacity','60') }}%</span>
+    <!-- Row 5: Shadow toggle -->
+    <div class="card" style="background:var(--bg3);margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-weight:700">🌑 ظل النص</div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="overlay-show-shadow"
+                 {{ 'checked' if cfg.get('overlay_show_shadow','true') == 'true' }}
+                 onchange="toggleShadowSettings(this.checked)"
+                 style="width:16px;height:16px">
+          <span>تفعيل الظل</span>
         </label>
-        <input type="range" id="overlay-bg-opacity" min="0" max="100"
-               value="{{ cfg.get('overlay_bg_opacity','60') }}"
-               oninput="document.getElementById('bg-opacity-val').textContent=this.value+'%'">
       </div>
-      <div class="form-group">
-        <label>Padding (px)</label>
-        <input type="number" id="overlay-padding"
-               value="{{ cfg.get('overlay_padding','20') }}" min="5" max="60">
+      <div id="shadow-settings" style="{{ 'display:none' if cfg.get('overlay_show_shadow','true') != 'true' else '' }}">
+        <div class="grid-2">
+          <div class="form-group" style="margin-bottom:0">
+            <label>لون الظل</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="color" id="overlay-shadow-color"
+                     value="{{ cfg.get('overlay_shadow_color','#000000') }}"
+                     style="width:50px;height:36px;padding:2px;border-radius:6px">
+              <input type="text" id="overlay-shadow-color-hex"
+                     value="{{ cfg.get('overlay_shadow_color','#000000') }}"
+                     style="width:100px" oninput="syncColor('shadow')">
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>إزاحة الظل (px)</label>
+            <input type="number" id="overlay-shadow-offset"
+                   value="{{ cfg.get('overlay_shadow_offset','3') }}" min="1" max="15"
+                   style="max-width:100px">
+          </div>
+        </div>
       </div>
     </div>
 
+    <!-- Row 6: Max chars -->
     <div class="form-group">
       <label>حد الأحرف للنص</label>
       <input type="number" id="overlay-max-chars"
@@ -249,19 +318,31 @@ function saveImageConfig(){
 
 function saveOverlayConfig(){
   const data = {
-    overlay_enabled:     document.getElementById('overlay-enabled').checked ? 'true' : 'false',
-    overlay_text_source: document.getElementById('overlay-text-source').value,
-    overlay_custom_text: document.getElementById('overlay-custom-text')?.value || '',
-    overlay_position:    document.getElementById('overlay-position').value,
-    overlay_font_size:   document.getElementById('overlay-font-size').value,
-    overlay_font_color:  document.getElementById('overlay-font-color').value,
-    overlay_bg_color:    document.getElementById('overlay-bg-color').value,
-    overlay_bg_opacity:  document.getElementById('overlay-bg-opacity').value,
-    overlay_padding:     document.getElementById('overlay-padding').value,
-    overlay_max_chars:   document.getElementById('overlay-max-chars').value,
+    overlay_enabled:      document.getElementById('overlay-enabled').checked ? 'true' : 'false',
+    overlay_text_source:  document.getElementById('overlay-text-source').value,
+    overlay_custom_text:  document.getElementById('overlay-custom-text')?.value || '',
+    overlay_position:     document.getElementById('overlay-position').value,
+    overlay_font_name:    document.getElementById('overlay-font-name').value,
+    overlay_font_size:    document.getElementById('overlay-font-size').value,
+    overlay_font_color:   document.getElementById('overlay-font-color').value,
+    overlay_show_bg:      document.getElementById('overlay-show-bg').checked ? 'true' : 'false',
+    overlay_bg_color:     document.getElementById('overlay-bg-color').value,
+    overlay_bg_opacity:   document.getElementById('overlay-bg-opacity').value,
+    overlay_padding:      document.getElementById('overlay-padding').value,
+    overlay_show_shadow:  document.getElementById('overlay-show-shadow').checked ? 'true' : 'false',
+    overlay_shadow_color: document.getElementById('overlay-shadow-color').value,
+    overlay_shadow_offset:document.getElementById('overlay-shadow-offset').value,
+    overlay_max_chars:    document.getElementById('overlay-max-chars').value,
   };
   return fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
     .then(r=>r.json());
+}
+
+function toggleBgSettings(checked){
+  document.getElementById('bg-settings').style.display = checked ? '' : 'none';
+}
+function toggleShadowSettings(checked){
+  document.getElementById('shadow-settings').style.display = checked ? '' : 'none';
 }
 
 async function saveAllImageConfig(){
@@ -282,13 +363,47 @@ function syncColor(type){
   if(/^#[0-9A-Fa-f]{6}$/.test(hex)) document.getElementById(`overlay-${type}-color`).value = hex;
 }
 document.addEventListener('DOMContentLoaded',()=>{
-  document.getElementById('overlay-font-color')?.addEventListener('input',function(){
-    document.getElementById('overlay-font-color-hex').value = this.value;
+  ['font','bg','shadow'].forEach(type => {
+    document.getElementById(`overlay-${type}-color`)?.addEventListener('input',function(){
+      const hexEl = document.getElementById(`overlay-${type}-color-hex`);
+      if(hexEl) hexEl.value = this.value;
+    });
   });
-  document.getElementById('overlay-bg-color')?.addEventListener('input',function(){
-    document.getElementById('overlay-bg-color-hex').value = this.value;
-  });
+  // Load font availability
+  fetch('/api/overlay/fonts').then(r=>r.json()).then(d=>{
+    if(!d.ok) return;
+    const sel = document.getElementById('overlay-font-name');
+    const status = document.getElementById('font-status');
+    if(!sel) return;
+    const available = [];
+    const missing = [];
+    Object.entries(d.fonts).forEach(([name, info])=>{
+      const opt = sel.querySelector(`option[value="${name}"]`);
+      if(opt){
+        if(info.available){
+          opt.textContent = opt.textContent.replace(' ⚠️','') + ' ✅';
+          available.push(info.label.split('—')[0].trim());
+        } else {
+          opt.textContent = opt.textContent.replace(' ✅','') + ' ⚠️';
+          missing.push(name);
+        }
+      }
+    });
+    if(status){
+      if(missing.length === 0){
+        status.innerHTML = `✅ كل الخطوط متاحة`;
+        status.style.color = 'var(--green)';
+      } else {
+        status.innerHTML = `⚠️ ${missing.length} خط غير مثبّت — <a href="#" onclick="showFontInstall()" style="color:var(--accent)">كيفية التثبيت</a>`;
+        status.style.color = 'var(--orange)';
+      }
+    }
+  }).catch(()=>{});
 });
+
+function showFontInstall(){
+  alert('لتثبيت الخطوط على PythonAnywhere:\n\n1. افتح Bash Console\n2. شغّل:\npip install fonttools\n\nأو حمّل ملفات الخطوط يدوياً إلى:\n/home/USERNAME/social-post/static/fonts/\n\nالخطوط المطلوبة:\n- Cairo-Regular.ttf\n- NotoNaskhArabic-Regular.ttf\n- NotoKufiArabic-Regular.ttf\n- Amiri-Regular.ttf\n- Tajawal-Regular.ttf\n\nيمكن تحميلها من: fonts.google.com');
+}
 
 async function previewOverlay(){
   const btn = document.getElementById('preview-btn');

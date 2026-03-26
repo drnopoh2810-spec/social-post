@@ -582,17 +582,19 @@ def save_telegram_config():
 @api_bp.route('/prompts/reset', methods=['POST'])
 @login_required
 def reset_prompts():
-    """إعادة ضبط البرومبتات للقيم الافتراضية الجديدة."""
+    """إعادة ضبط البرومبتات للقيم الجديدة من prompts_config.py"""
     from database.models import Prompt
-    # حذف كل البرومبتات الحالية
-    Prompt.query.delete()
-    db.session.commit()
-    # إعادة seed من app.py
     try:
-        from app import _seed_prompts
-        _seed_prompts()
+        Prompt.query.delete()
         db.session.commit()
-        return jsonify({'ok': True, 'message': 'تم إعادة ضبط البرومبتات ✅'})
+        from prompts_config import PROMPTS
+        for stage, model, temp, tokens, sys_p, usr_p in PROMPTS:
+            db.session.add(Prompt(
+                stage=stage, model=model, temperature=temp, max_tokens=tokens,
+                system_prompt=sys_p, user_prompt=usr_p
+            ))
+        db.session.commit()
+        return jsonify({'ok': True, 'message': f'تم إعادة ضبط {len(PROMPTS)} برومبت ✅'})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]})
 @login_required
@@ -1023,7 +1025,8 @@ def test_image_generation():
         if not cloud_name:
             return jsonify({'ok': False, 'error': 'Cloudinary غير مضبوط'})
 
-        url = upload_to_cloudinary(image_bytes, cloud_name, api_key, api_secret, folder='test')
+        url_result = upload_to_cloudinary(image_bytes, cloud_name, api_key, api_secret, folder='test')
+        url = url_result[0] if isinstance(url_result, tuple) else url_result
         return jsonify({'ok': True, 'url': url, 'provider': used})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:300]})
@@ -1098,9 +1101,10 @@ def test_image_overlay():
             else:
                 overlay_text = generate_overlay_text(post_content, idea)
 
-        url = upload_to_cloudinary(
+        url_result = upload_to_cloudinary(
             overlaid, cloud_name, api_key, api_secret, folder='test_overlay'
         )
+        url = url_result[0] if isinstance(url_result, tuple) else url_result
         return jsonify({'ok': True, 'url': url, 'provider': used, 'overlay_text': overlay_text})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:300]})
@@ -1213,3 +1217,11 @@ def analytics_summary():
         'tone_avg':  tone_avg,
         'daily':     daily,
     })
+
+
+@api_bp.route('/overlay/fonts', methods=['GET'])
+@login_required
+def get_overlay_fonts():
+    """Return available Arabic fonts with availability status."""
+    from services.overlay_service import get_available_fonts
+    return jsonify({'ok': True, 'fonts': get_available_fonts()})

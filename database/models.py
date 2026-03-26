@@ -109,14 +109,19 @@ class Config(db.Model):
         'apyhub_token':                'APYHUB_TOKEN',
         # ── Image Text Overlay ────────────────────────────────────────────────
         'overlay_enabled':             'OVERLAY_ENABLED',
-        'overlay_text_source':         'OVERLAY_TEXT_SOURCE',   # ai | first_line | custom
+        'overlay_text_source':         'OVERLAY_TEXT_SOURCE',
         'overlay_custom_text':         'OVERLAY_CUSTOM_TEXT',
-        'overlay_position':            'OVERLAY_POSITION',      # top|center|bottom + left|center|right
+        'overlay_position':            'OVERLAY_POSITION',
+        'overlay_font_name':           'OVERLAY_FONT_NAME',
         'overlay_font_size':           'OVERLAY_FONT_SIZE',
         'overlay_font_color':          'OVERLAY_FONT_COLOR',
+        'overlay_show_bg':             'OVERLAY_SHOW_BG',
         'overlay_bg_color':            'OVERLAY_BG_COLOR',
         'overlay_bg_opacity':          'OVERLAY_BG_OPACITY',
         'overlay_padding':             'OVERLAY_PADDING',
+        'overlay_show_shadow':         'OVERLAY_SHOW_SHADOW',
+        'overlay_shadow_color':        'OVERLAY_SHADOW_COLOR',
+        'overlay_shadow_offset':       'OVERLAY_SHADOW_OFFSET',
         'overlay_max_chars':           'OVERLAY_MAX_CHARS',
 
         # ── Social platforms ──────────────────────────────────────────────────

@@ -241,6 +241,7 @@ def _run_single_post(post, cfg, niche, db, ss, process_image,
 
     # ── 3. Generate image ──────────────────────────────────────────────────
     image_url = None
+    image_pid = None   # Cloudinary public_id for deletion after publishing
     if post_type == "image":
         ip_provider, ip_prompt = get_ai_config("image_prompt")
         if ip_prompt:
@@ -251,17 +252,21 @@ def _run_single_post(post, cfg, niche, db, ss, process_image,
                     int(cfg.get("image_height", "1350") or 1350),
                     ip_prompt, ip_provider,
                 )
-                candidate_url = process_image(
+                result = process_image(
                     {**cfg, "image_prompt": img_prompt,
                      "post_content": post_content,
                      "idea": post.idea or ""},
                     cfg
                 )
-                if _is_valid_image_url(candidate_url):
-                    image_url = candidate_url
+                # process_image now returns (url, public_id)
+                if isinstance(result, tuple):
+                    image_url, image_pid = result
+                else:
+                    image_url = result  # backward compat
+                if _is_valid_image_url(image_url):
                     post.image_url = image_url
                 else:
-                    logger.warning(f"Image generation returned invalid URL — falling back to text post")
+                    logger.warning("Image generation returned invalid URL — falling back to text post")
                     post_type = "text"
                     post.post_type = "text"
             except Exception as img_err:
@@ -394,6 +399,21 @@ def _run_single_post(post, cfg, niche, db, ss, process_image,
          "info" if published_to else "warning")
 
     logger.info(f"Post #{post.id} published to: {pub_str}")
+
+    # ── 6. Delete image from Cloudinary after publishing ──────────────────
+    # الصورة تم نشرها على المنصات — لا حاجة لها على Cloudinary
+    if image_pid and published_to:
+        try:
+            from services.image_service import delete_from_cloudinary
+            cloud_name = cfg.get("cloudinary_cloud_name", "")
+            api_key    = cfg.get("cloudinary_api_key", "")
+            api_secret = cfg.get("cloudinary_api_secret", "")
+            if cloud_name and api_key and api_secret:
+                deleted = delete_from_cloudinary(image_pid, cloud_name, api_key, api_secret)
+                if deleted:
+                    logger.info(f"Cloudinary: deleted image {image_pid} after publishing")
+        except Exception as e:
+            logger.warning(f"Cloudinary cleanup failed: {e}")  # non-critical
 
     # ── 6. Sync to Google Sheets ──────────────────────────────────────────
     try:

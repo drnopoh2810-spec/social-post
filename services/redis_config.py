@@ -1,173 +1,224 @@
 """
-Redis Config Store — Upstash Redis
-===================================
-يخزن جميع إعدادات التطبيق في Redis بحيث:
-- لا تضيع عند restart (PythonAnywhere / HuggingFace)
-- تُشارك بين عدة instances
-- تُحمَّل تلقائياً عند بدء التشغيل
+Redis Config Store — Upstash Redis via REST API
+=================================================
+يستخدم Upstash REST API (HTTPS port 443) بدل TCP port 6379.
+هذا يحل مشكلة PythonAnywhere الذي يحجب port 6379.
 
 الاستخدام:
-  REDIS_URL=redis://default:TOKEN@host:port  (في .env أو HF Secrets)
+  REDIS_URL=rediss://default:TOKEN@host:6379  (يُحوَّل تلقائياً لـ REST)
+  أو مباشرةً:
+  UPSTASH_REDIS_REST_URL=https://host.upstash.io
+  UPSTASH_REDIS_REST_TOKEN=TOKEN
 """
 
 import os
 import logging
+import requests as _requests
 
 logger = logging.getLogger(__name__)
 
-_redis_client = None
-_redis_failed  = False   # True = tried and failed, don't retry until reset
+_rest_url   = None   # https://current-fox-81218.upstash.io
+_rest_token = None   # Bearer token
+_connected  = False
+_failed     = False
 
 
 def reset_redis_client():
-    """Force reconnect on next call (e.g. after REDIS_URL is set)."""
-    global _redis_client, _redis_failed
-    _redis_client = None
-    _redis_failed  = False
+    """Force reconnect on next call."""
+    global _rest_url, _rest_token, _connected, _failed
+    _rest_url   = None
+    _rest_token = None
+    _connected  = False
+    _failed     = False
 
 
-def get_redis():
-    """Get or create Redis client. Returns None if not configured."""
-    global _redis_client, _redis_failed
+def _parse_redis_url(url: str):
+    """
+    Extract REST URL and token from various Upstash URL formats.
 
-    if _redis_client is not None:
-        return _redis_client
+    Supported formats:
+      rediss://default:TOKEN@host:6379
+      redis://default:TOKEN@host:6379
+      https://host.upstash.io  (with separate token)
+    """
+    url = url.strip()
+    if url.startswith("https://"):
+        # Already REST URL — token must come from env
+        token = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+        return url.rstrip("/"), token
 
-    # Don't retry if already failed in this session
-    # (unless reset_redis_client() was called)
-    if _redis_failed:
-        return None
+    # Parse redis(s)://default:TOKEN@host:PORT
+    try:
+        # Remove scheme
+        rest = url.split("://", 1)[1] if "://" in url else url
+        # Split user:pass@host:port
+        at_idx = rest.rfind("@")
+        if at_idx == -1:
+            return None, None
+        userinfo = rest[:at_idx]          # default:TOKEN
+        hostport = rest[at_idx + 1:]      # host:6379
+        host     = hostport.split(":")[0] # host only
+        token    = userinfo.split(":", 1)[1] if ":" in userinfo else userinfo
+        rest_url = f"https://{host}"
+        return rest_url, token
+    except Exception as e:
+        logger.warning(f"Could not parse Redis URL: {e}")
+        return None, None
 
-    # Try env ONLY first (avoid circular dependency with DB)
-    url = os.environ.get('REDIS_URL', '').strip()
 
-    # If not in env, try DB directly
-    if not url:
+def _init_client():
+    """Initialize REST client from env or DB."""
+    global _rest_url, _rest_token, _connected, _failed
+
+    if _connected:
+        return True
+    if _failed:
+        return False
+
+    # 1. Try UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN directly
+    rest_url   = os.environ.get("UPSTASH_REDIS_REST_URL", "").strip()
+    rest_token = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "").strip()
+
+    # 2. Try REDIS_URL (parse it)
+    if not rest_url:
+        redis_url = os.environ.get("REDIS_URL", "").strip()
+        if redis_url:
+            rest_url, rest_token = _parse_redis_url(redis_url)
+
+    # 3. Try DB
+    if not rest_url:
         try:
-            from database.models import Config as _Cfg, db as _db
+            from database.models import db as _db, Config as _Cfg
             row = _db.session.get(_Cfg, 'redis_url')
-            url = row.value if row else ''
+            if row and row.value:
+                rest_url, rest_token = _parse_redis_url(row.value)
         except Exception:
             pass
 
-    if not url:
-        return None
+    if not rest_url or not rest_token:
+        return False
 
+    # Test connection with a PING
     try:
-        import redis
-        # Upstash requires TLS — force rediss:// if redis:// provided
-        if url.startswith("redis://") and not url.startswith("rediss://"):
-            url = "rediss://" + url[8:]
-            logger.info("Auto-converted Redis URL to TLS (rediss://)")
-        _redis_client = redis.from_url(
-            url,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=5,
-            retry_on_timeout=True,
-            ssl_cert_reqs=None,
+        r = _requests.post(
+            f"{rest_url}/ping",
+            headers={"Authorization": f"Bearer {rest_token}"},
+            timeout=8,
         )
-        _redis_client.ping()
-        _redis_failed = False
-        logger.info("Redis connected successfully")
-        return _redis_client
+        if r.ok and "PONG" in r.text.upper():
+            _rest_url   = rest_url
+            _rest_token = rest_token
+            _connected  = True
+            logger.info(f"Redis REST connected: {rest_url}")
+            return True
+        else:
+            logger.warning(f"Redis REST ping failed: {r.status_code} {r.text[:100]}")
+            _failed = True
+            return False
     except Exception as e:
-        logger.warning(f"Redis connection failed: {e} — falling back to DB only")
-        _redis_client = None
-        _redis_failed  = True
+        logger.warning(f"Redis REST connection failed: {e}")
+        _failed = True
+        return False
+
+
+def get_redis():
+    """Returns True if connected, None otherwise (for backward compat)."""
+    if _init_client():
+        return True
+    return None
+
+
+def _exec(command: list):
+    """Execute a Redis command via REST API."""
+    if not _init_client():
+        return None
+    try:
+        r = _requests.post(
+            f"{_rest_url}/{'/'.join(str(c) for c in command)}",
+            headers={"Authorization": f"Bearer {_rest_token}"},
+            timeout=8,
+        )
+        if r.ok:
+            return r.json().get("result")
+        logger.warning(f"Redis REST error: {r.status_code} {r.text[:100]}")
+        return None
+    except Exception as e:
+        logger.warning(f"Redis REST exec failed: {e}")
         return None
 
 
 def redis_get(key: str, default: str = '') -> str:
     """Get a config value from Redis."""
-    r = get_redis()
-    if not r:
-        return default
-    try:
-        val = r.get(f'config:{key}')
-        return val if val is not None else default
-    except Exception as e:
-        logger.warning(f"Redis get failed for {key}: {e}")
-        return default
+    val = _exec(["GET", f"config:{key}"])
+    return val if val is not None else default
 
 
 def redis_set(key: str, value: str):
     """Set a config value in Redis."""
-    r = get_redis()
-    if not r:
-        return
-    try:
-        r.set(f'config:{key}', value)
-    except Exception as e:
-        logger.warning(f"Redis set failed for {key}: {e}")
+    _exec(["SET", f"config:{key}", str(value)])
 
 
 def redis_get_all() -> dict:
     """Get all config values from Redis."""
-    r = get_redis()
-    if not r:
+    if not _init_client():
         return {}
     try:
-        keys = r.keys('config:*')
-        if not keys:
+        # KEYS config:*
+        keys_result = _exec(["KEYS", "config:*"])
+        if not keys_result:
             return {}
-        values = r.mget(keys)
-        return {
-            k.replace('config:', ''): v
-            for k, v in zip(keys, values)
-            if v is not None
-        }
+        result = {}
+        for k in keys_result:
+            val = _exec(["GET", k])
+            if val is not None:
+                result[k.replace("config:", "")] = val
+        return result
     except Exception as e:
-        logger.warning(f"Redis get_all failed: {e}")
+        logger.warning(f"redis_get_all failed: {e}")
         return {}
 
 
 def redis_set_many(data: dict):
-    """Set multiple config values in Redis at once."""
-    r = get_redis()
-    if not r:
+    """Set multiple config values in Redis at once using pipeline."""
+    if not _init_client():
         return
     try:
-        pipe = r.pipeline()
-        for key, value in data.items():
-            if value:
-                pipe.set(f'config:{key}', str(value))
-        pipe.execute()
-        logger.info(f"Redis: saved {len(data)} config values")
+        # Use Upstash pipeline endpoint for batch operations
+        pipeline = [[f"SET", f"config:{k}", str(v)] for k, v in data.items() if v]
+        r = _requests.post(
+            f"{_rest_url}/pipeline",
+            headers={"Authorization": f"Bearer {_rest_token}",
+                     "Content-Type": "application/json"},
+            json=pipeline,
+            timeout=15,
+        )
+        if r.ok:
+            logger.info(f"Redis pipeline: saved {len(pipeline)} values")
+        else:
+            logger.warning(f"Redis pipeline failed: {r.text[:100]}")
     except Exception as e:
-        logger.warning(f"Redis set_many failed: {e}")
+        logger.warning(f"redis_set_many failed: {e}")
 
 
 def sync_db_to_redis():
-    """
-    عند بدء التشغيل: اقرأ كل الـ config من DB واكتبها في Redis.
-    يضمن إن Redis دايماً محدّث.
-    """
-    r = get_redis()
-    if not r:
+    """Sync all Config rows from DB → Redis."""
+    if not _init_client():
         return
     try:
         from database.models import Config
         rows = Config.query.all()
         if not rows:
             return
-        pipe = r.pipeline()
-        for row in rows:
-            if row.value:
-                pipe.set(f'config:{row.key}', row.value)
-        pipe.execute()
-        logger.info(f"Synced {len(rows)} config rows → Redis")
+        data = {row.key: row.value for row in rows if row.value}
+        redis_set_many(data)
+        logger.info(f"Synced {len(data)} config rows → Redis")
     except Exception as e:
         logger.warning(f"sync_db_to_redis failed: {e}")
 
 
 def sync_redis_to_db():
-    """
-    عند بدء التشغيل: اقرأ كل الـ config من Redis واكتبها في DB.
-    يضمن إن DB محدّث حتى لو اتمسحت (HuggingFace restart).
-    """
-    r = get_redis()
-    if not r:
+    """Sync all Redis config values → DB."""
+    if not _init_client():
         return 0
     try:
         from database.models import db, Config

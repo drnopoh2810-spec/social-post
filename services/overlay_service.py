@@ -135,8 +135,8 @@ def _get_overlay_cfg() -> dict:
             "shadow_offset": int(Config.get("overlay_shadow_offset", "3") or 3),
             # Text
             "max_chars":     int(Config.get("overlay_max_chars", "60") or 60),
-            "offset_y":      int(Config.get("overlay_offset_y", "0") or 0),
-            "offset_x":      int(Config.get("overlay_offset_x", "0") or 0),
+            "offset_y":      int(Config.get("overlay_offset_y") or "0"),
+            "offset_x":      int(Config.get("overlay_offset_x") or "0"),
         }
     except Exception:
         return {
@@ -265,16 +265,30 @@ def apply_text_overlay(image_bytes: bytes, text: str, cfg: dict = None) -> bytes
     h_pos = parts[1] if len(parts) > 1 else "center"
     margin = int(H * 0.04)
 
-    x = margin if h_pos == "left" else (W - block_w - margin if h_pos == "right" else (W - block_w) // 2)
-    y = margin if v_pos == "top" else ((H - block_h) // 2 if v_pos == "center" else H - block_h - margin)
+    # Base position
+    if h_pos == "left":
+        x = margin
+    elif h_pos == "right":
+        x = W - block_w - margin
+    else:  # center
+        x = (W - block_w) // 2
 
-    # Apply fine-tune offsets
-    x += cfg.get("offset_x", 0)
-    y += cfg.get("offset_y", 0)
+    if v_pos == "top":
+        y = margin
+    elif v_pos == "center":
+        y = (H - block_h) // 2
+    else:  # bottom
+        y = H - block_h - margin
 
-    # Clamp to image bounds
-    x = max(0, min(x, W - block_w))
-    y = max(0, min(y, H - block_h))
+    # Apply fine-tune offsets (before clamping)
+    offset_x = cfg.get("offset_x", 0)
+    offset_y = cfg.get("offset_y", 0)
+    x += offset_x
+    y += offset_y
+
+    # Clamp to image bounds (with some tolerance for offsets)
+    x = max(-block_w // 4, min(x, W - block_w // 2))
+    y = max(-block_h // 4, min(y, H - block_h // 2))
 
     # ── Draw background ───────────────────────────────────────────────────────
     if cfg["show_bg"] and cfg["bg_opacity"] > 0:

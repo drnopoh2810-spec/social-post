@@ -132,13 +132,18 @@ def platforms_page():
 @login_required
 def image_config():
     from database.models import AIProviderKey
+    from services.key_rotator import get_image_chain
     cfg = {row.key: row.value for row in Config.query.all()}
-    img_providers = ['huggingface', 'together', 'fal']
+    img_providers = ['huggingface', 'together', 'fal', 'gemini_image', 'ideogram', 
+                     'openai_image', 'stability']
     keys_by_provider = {
         p: AIProviderKey.query.filter_by(provider=p).order_by(AIProviderKey.priority).all()
         for p in img_providers
     }
-    return render_template('pages/image_config.html', cfg=cfg, keys_by_provider=keys_by_provider)
+    # Get current provider order
+    current_order = get_image_chain()
+    return render_template('pages/image_config.html', cfg=cfg, keys_by_provider=keys_by_provider,
+                          current_order=current_order)
 
 
 @dashboard_bp.route('/scheduler')

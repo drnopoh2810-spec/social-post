@@ -9,35 +9,59 @@
 <!-- Provider chain status -->
 <div class="card" style="margin-bottom:20px">
   <div class="card-title">🔗 سلسلة توليد الصور (الترتيب التلقائي)</div>
-  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0">
-    {% set chain = [
-      ('☁️','Cloudflare','worker_url',''),
-      ('🔵','Imagen 4','','gemini_image'),
-      ('🎨','Ideogram v3','','ideogram'),
-      ('🟢','OpenAI Image','','openai_image'),
-      ('🔷','Stability AI','','stability'),
-      ('🤗','HuggingFace','','huggingface'),
-      ('🔗','Together AI','','together'),
-      ('⚡','Fal.ai','','fal'),
-      ('🛩️','airforce','',''),
-      ('🌸','Pollinations','','')
-    ] %}
-    {% for icon, label, cfg_key, provider in chain %}
+  
+  <!-- Reorder button -->
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="font-size:13px;color:var(--text3)">
+      💡 اسحب المصادر لتغيير الترتيب، أو اضغط "إعادة الترتيب الافتراضي"
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-secondary btn-sm" onclick="resetProviderOrder()">
+        ↺ الترتيب الافتراضي
+      </button>
+      <button class="btn btn-primary btn-sm" onclick="saveProviderOrder()">
+        💾 حفظ الترتيب
+      </button>
+    </div>
+  </div>
+
+  <!-- Draggable provider chain -->
+  <div id="provider-chain" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0">
+    {% set all_providers = {
+      'cloudflare': ('☁️','Cloudflare','worker_url',''),
+      'google_imagen': ('🔵','Imagen 4','','gemini_image'),
+      'ideogram': ('🎨','Ideogram v3','','ideogram'),
+      'openai_image': ('🟢','OpenAI Image','','openai_image'),
+      'stability': ('🔷','Stability AI','','stability'),
+      'huggingface': ('🤗','HuggingFace','','huggingface'),
+      'together': ('🔗','Together AI','','together'),
+      'fal': ('⚡','Fal.ai','','fal'),
+      'airforce': ('🛩️','airforce','',''),
+      'pollinations': ('🌸','Pollinations','','')
+    } %}
+    {% for provider_id in current_order %}
+    {% if provider_id in all_providers %}
+    {% set icon, label, cfg_key, provider = all_providers[provider_id] %}
     {% set has_key = (cfg_key and cfg.get(cfg_key)) or (provider and keys_by_provider.get(provider, [])|selectattr('is_active')|list|length > 0) or (not cfg_key and not provider) %}
-    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 14px;
+    <div class="provider-item" draggable="true" data-provider="{{ provider_id }}"
+         style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 14px;
                 border:1px solid {{ 'var(--green)' if has_key else 'var(--border)' }};
-                border-radius:8px;min-width:90px;opacity:{{ '1' if has_key else '0.5' }}">
+                border-radius:8px;min-width:90px;opacity:{{ '1' if has_key else '0.5' }};
+                cursor:move;background:var(--bg2);transition:all 0.2s">
       <span style="font-size:20px">{{ icon }}</span>
       <span style="font-size:11px;font-weight:700">{{ label }}</span>
       <span style="font-size:10px;color:{{ 'var(--green)' if has_key else 'var(--text3)' }}">
         {{ '✅ جاهز' if has_key else '⚠️ لا يوجد مفتاح' }}
       </span>
+      <span style="font-size:9px;color:var(--text3);margin-top:2px">⋮⋮ اسحب</span>
     </div>
     {% if not loop.last %}
-    <span style="font-size:18px;color:var(--text3)">→</span>
+    <span class="arrow-separator" style="font-size:18px;color:var(--text3)">→</span>
+    {% endif %}
     {% endif %}
     {% endfor %}
   </div>
+  
   <div style="margin-top:10px;font-size:12px;color:var(--text3)">
     💡 أضف مفاتيح الـ providers من صفحة
     <a href="/ai-keys" style="color:var(--accent)">🗝️ مفاتيح AI</a>
@@ -617,7 +641,7 @@ function testImage(){
     btn.disabled = false; btn.textContent = '🎨 توليد صورة تجريبية';
     if(d.ok){
       document.getElementById('test-status').innerHTML =
-        `✅ تم التوليد عبر <strong>${d.provider}</strong>`;
+        `✅ تم التوليد عبر <strong style="color:var(--accent)">${d.provider}</strong>`;
       const img = document.getElementById('test-img');
       img.src = d.url;
       img.style.display = 'block';
@@ -628,6 +652,121 @@ function testImage(){
   .catch(e=>{
     btn.disabled = false; btn.textContent = '🎨 توليد صورة تجريبية';
     document.getElementById('test-status').textContent = '❌ خطأ: ' + e;
+  });
+}
+
+// ── Provider Order Drag & Drop ────────────────────────────────────────────────
+let draggedElement = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+  const container = document.getElementById('provider-chain');
+  if (!container) return;
+
+  container.addEventListener('dragstart', (e) => {
+    if (e.target.classList.contains('provider-item')) {
+      draggedElement = e.target;
+      e.target.style.opacity = '0.4';
+    }
+  });
+
+  container.addEventListener('dragend', (e) => {
+    if (e.target.classList.contains('provider-item')) {
+      e.target.style.opacity = '1';
+    }
+  });
+
+  container.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    const afterElement = getDragAfterElement(container, e.clientX);
+    const draggable = draggedElement;
+    if (afterElement == null) {
+      // Find last provider-item
+      const items = [...container.querySelectorAll('.provider-item')];
+      const lastItem = items[items.length - 1];
+      if (lastItem && lastItem !== draggable) {
+        const arrow = lastItem.nextElementSibling;
+        if (arrow && arrow.classList.contains('arrow-separator')) {
+          container.insertBefore(draggable, arrow.nextSibling);
+        } else {
+          container.appendChild(draggable);
+        }
+        // Add arrow if needed
+        if (!draggable.nextElementSibling || !draggable.nextElementSibling.classList.contains('arrow-separator')) {
+          const newArrow = document.createElement('span');
+          newArrow.className = 'arrow-separator';
+          newArrow.style.cssText = 'font-size:18px;color:var(--text3)';
+          newArrow.textContent = '→';
+          container.insertBefore(newArrow, draggable.nextSibling);
+        }
+      }
+    } else {
+      container.insertBefore(draggable, afterElement);
+      // Fix arrows
+      fixArrows();
+    }
+  });
+
+  function getDragAfterElement(container, x) {
+    const draggableElements = [...container.querySelectorAll('.provider-item:not(.dragging)')];
+    return draggableElements.reduce((closest, child) => {
+      const box = child.getBoundingClientRect();
+      const offset = x - box.left - box.width / 2;
+      if (offset < 0 && offset > closest.offset) {
+        return { offset: offset, element: child };
+      } else {
+        return closest;
+      }
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
+  }
+
+  function fixArrows() {
+    const items = container.querySelectorAll('.provider-item');
+    const arrows = container.querySelectorAll('.arrow-separator');
+    arrows.forEach(a => a.remove());
+    items.forEach((item, idx) => {
+      if (idx < items.length - 1) {
+        const arrow = document.createElement('span');
+        arrow.className = 'arrow-separator';
+        arrow.style.cssText = 'font-size:18px;color:var(--text3)';
+        arrow.textContent = '→';
+        item.after(arrow);
+      }
+    });
+  }
+});
+
+function saveProviderOrder() {
+  const container = document.getElementById('provider-chain');
+  const items = container.querySelectorAll('.provider-item');
+  const order = Array.from(items).map(item => item.dataset.provider);
+  
+  fetch('/api/config', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body: JSON.stringify({image_provider_chain: order.join(',')})
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) {
+      toast('✅ تم حفظ ترتيب المصادر', 'green');
+    } else {
+      toast('❌ فشل الحفظ', 'red');
+    }
+  });
+}
+
+function resetProviderOrder() {
+  fetch('/api/config', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body: JSON.stringify({image_provider_chain: ''})
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) {
+      toast('✅ تم إعادة الترتيب الافتراضي', 'green');
+      setTimeout(() => location.reload(), 800);
+    }
   });
 }
 </script>

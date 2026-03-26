@@ -173,6 +173,43 @@
           <option value="bottom-center" {{ 'selected' if pos == 'bottom-center' }}>⬇ أسفل وسط ⭐</option>
           <option value="bottom-right"  {{ 'selected' if pos == 'bottom-right' }}>↘ أسفل يمين</option>
         </select>
+        <!-- إزاحة دقيقة بالـ px -->
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+            <label style="font-size:11px;color:var(--text3);margin:0">↕ إزاحة عمودية</label>
+            <div style="display:flex;align-items:center;gap:4px">
+              <button type="button" onclick="adjustOffset('y',-5)"
+                      style="width:28px;height:28px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);cursor:pointer;font-size:14px">▲</button>
+              <input type="number" id="overlay-offset-y"
+                     value="{{ cfg.get('overlay_offset_y','0') }}"
+                     style="width:64px;text-align:center;padding:4px 6px"
+                     title="موجب = للأسفل | سالب = للأعلى"
+                     placeholder="0">
+              <button type="button" onclick="adjustOffset('y',5)"
+                      style="width:28px;height:28px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);cursor:pointer;font-size:14px">▼</button>
+            </div>
+            <span style="font-size:10px;color:var(--text3)">px (+ أسفل / − أعلى)</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+            <label style="font-size:11px;color:var(--text3);margin:0">↔ إزاحة أفقية</label>
+            <div style="display:flex;align-items:center;gap:4px">
+              <button type="button" onclick="adjustOffset('x',-5)"
+                      style="width:28px;height:28px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);cursor:pointer;font-size:14px">◄</button>
+              <input type="number" id="overlay-offset-x"
+                     value="{{ cfg.get('overlay_offset_x','0') }}"
+                     style="width:64px;text-align:center;padding:4px 6px"
+                     title="موجب = يمين | سالب = يسار"
+                     placeholder="0">
+              <button type="button" onclick="adjustOffset('x',5)"
+                      style="width:28px;height:28px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);cursor:pointer;font-size:14px">►</button>
+            </div>
+            <span style="font-size:10px;color:var(--text3)">px (+ يمين / − يسار)</span>
+          </div>
+          <button type="button" onclick="resetOffsets()"
+                  style="align-self:flex-end;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);cursor:pointer;margin-bottom:18px">
+            ↺ صفر
+          </button>
+        </div>
       </div>
     </div>
 
@@ -333,11 +370,21 @@ function saveOverlayConfig(){
     overlay_shadow_color: document.getElementById('overlay-shadow-color').value,
     overlay_shadow_offset:document.getElementById('overlay-shadow-offset').value,
     overlay_max_chars:    document.getElementById('overlay-max-chars').value,
+    overlay_offset_y:     document.getElementById('overlay-offset-y').value,
+    overlay_offset_x:     document.getElementById('overlay-offset-x').value,
   };
   return fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},body:JSON.stringify(data)})
     .then(r=>r.json());
 }
 
+function adjustOffset(axis, delta){
+  const el = document.getElementById(`overlay-offset-${axis}`);
+  el.value = (parseInt(el.value) || 0) + delta;
+}
+function resetOffsets(){
+  document.getElementById('overlay-offset-y').value = 0;
+  document.getElementById('overlay-offset-x').value = 0;
+}
 function toggleBgSettings(checked){
   document.getElementById('bg-settings').style.display = checked ? '' : 'none';
 }

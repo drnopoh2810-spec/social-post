@@ -123,6 +123,8 @@ class Config(db.Model):
         'overlay_shadow_color':        'OVERLAY_SHADOW_COLOR',
         'overlay_shadow_offset':       'OVERLAY_SHADOW_OFFSET',
         'overlay_max_chars':           'OVERLAY_MAX_CHARS',
+        'overlay_offset_y':            'OVERLAY_OFFSET_Y',
+        'overlay_offset_x':            'OVERLAY_OFFSET_X',
 
         # ── Social platforms ──────────────────────────────────────────────────
         'fb_page_id':                  'FB_PAGE_ID',

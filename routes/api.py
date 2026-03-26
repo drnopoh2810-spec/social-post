@@ -1225,3 +1225,72 @@ def get_overlay_fonts():
     """Return available Arabic fonts with availability status."""
     from services.overlay_service import get_available_fonts
     return jsonify({'ok': True, 'fonts': get_available_fonts()})
+
+
+# ── Provider chain order ──────────────────────────────────────────────────────
+
+@api_bp.route('/provider-chain', methods=['GET'])
+@login_required
+def get_provider_chain():
+    """Get current AI and image provider chains."""
+    from services.key_rotator import get_ai_chain, get_image_chain, _DEFAULT_AI_CHAIN, _DEFAULT_IMAGE_CHAIN
+    return jsonify({
+        'ok': True,
+        'ai_chain':    get_ai_chain(),
+        'image_chain': get_image_chain(),
+        'ai_default':    list(_DEFAULT_AI_CHAIN),
+        'image_default': list(_DEFAULT_IMAGE_CHAIN),
+    })
+
+
+@api_bp.route('/provider-chain', methods=['POST'])
+@login_required
+def save_provider_chain():
+    """Save AI and/or image provider chain order."""
+    data = request.json or {}
+    if 'ai_chain' in data:
+        chain = [p.strip() for p in data['ai_chain'] if p.strip()]
+        Config.set('ai_provider_chain', ','.join(chain))
+    if 'image_chain' in data:
+        chain = [p.strip() for p in data['image_chain'] if p.strip()]
+        Config.set('image_provider_chain', ','.join(chain))
+    return jsonify({'ok': True})
+
+
+@api_bp.route('/redis/status', methods=['GET'])
+@login_required
+def redis_status():
+    """Check Redis connection status and key count."""
+    try:
+        from services.redis_config import get_redis, reset_redis_client
+        # Force reconnect attempt
+        reset_redis_client()
+        r = get_redis()
+        if not r:
+            return jsonify({'ok': False, 'connected': False,
+                            'error': 'REDIS_URL غير مضبوط أو الاتصال فشل'})
+        keys = r.keys('config:*')
+        return jsonify({
+            'ok': True, 'connected': True,
+            'keys_count': len(keys),
+            'message': f'✅ متصل — {len(keys)} مفتاح محفوظ'
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'connected': False, 'error': str(e)[:200]})
+
+
+@api_bp.route('/redis/sync', methods=['POST'])
+@login_required
+def redis_force_sync():
+    """Force sync DB → Redis."""
+    try:
+        from services.redis_config import sync_db_to_redis, reset_redis_client, get_redis
+        reset_redis_client()
+        r = get_redis()
+        if not r:
+            return jsonify({'ok': False, 'error': 'Redis غير متصل'})
+        sync_db_to_redis()
+        keys = r.keys('config:*')
+        return jsonify({'ok': True, 'message': f'✅ تم sync {len(keys)} مفتاح إلى Redis'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]})

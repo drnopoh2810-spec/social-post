@@ -646,78 +646,49 @@ def process_image(post_data, cfg):
     image_bytes   = None
     used_provider = ""
 
-    # 1. Cloudflare Worker
-    if worker_url:
+    # Load image provider chain from Config (user-defined order)
+    from services.key_rotator import get_image_chain
+    img_chain = get_image_chain()
+
+    # Map provider name → try function
+    _providers = {
+        "cloudflare":   lambda: generate_image_cloudflare(worker_url, enhanced, width, height) if worker_url else (_ for _ in ()).throw(ValueError("no worker_url")),
+        "google_imagen": lambda: _try_gemini_image(enhanced, width, height),
+        "ideogram":     lambda: _try_ideogram(enhanced, width, height),
+        "openai_image": lambda: _try_openai_image(enhanced, width, height),
+        "stability":    lambda: _try_stability(enhanced, width, height),
+        "huggingface":  lambda: _try_huggingface(enhanced, width, height),
+        "together":     lambda: _try_together(enhanced, width, height),
+        "fal":          lambda: _try_fal(enhanced, width, height),
+        "airforce":     lambda: _try_airforce(enhanced, width, height),
+        "pollinations": lambda: generate_image_pollinations(enhanced, width=width, height=height, api_key=poll_key) if poll_key else None,
+    }
+
+    for provider_name in img_chain:
+        if image_bytes:
+            break
+        fn = _providers.get(provider_name)
+        if not fn:
+            continue
         try:
-            image_bytes   = generate_image_cloudflare(worker_url, enhanced, width, height)
-            used_provider = "cloudflare"
-            logger.info("✅ Image via Cloudflare Worker")
+            result = fn()
+            if result:
+                image_bytes   = result
+                used_provider = provider_name
+                logger.info(f"✅ Image via {provider_name}")
         except Exception as e:
-            logger.warning(f"Cloudflare failed: {e}")
+            logger.warning(f"{provider_name} failed: {e}")
 
-    # 2. Google Imagen 4 / Gemini Image
-    if image_bytes is None:
-        image_bytes = _try_gemini_image(enhanced, width, height)
-        if image_bytes: used_provider = "google_imagen"
-
-    # 3. Ideogram v3
-    if image_bytes is None:
-        image_bytes = _try_ideogram(enhanced, width, height)
-        if image_bytes: used_provider = "ideogram"
-
-    # 4. OpenAI gpt-image-1
-    if image_bytes is None:
-        image_bytes = _try_openai_image(enhanced, width, height)
-        if image_bytes: used_provider = "openai_image"
-
-    # 5. Stability AI
-    if image_bytes is None:
-        image_bytes = _try_stability(enhanced, width, height)
-        if image_bytes: used_provider = "stability"
-
-    # 6. HuggingFace
-    if image_bytes is None:
-        image_bytes = _try_huggingface(enhanced, width, height)
-        if image_bytes: used_provider = "huggingface"
-
-    # 7. Together AI
-    if image_bytes is None:
-        image_bytes = _try_together(enhanced, width, height)
-        if image_bytes: used_provider = "together"
-
-    # 8. Fal.ai
-    if image_bytes is None:
-        image_bytes = _try_fal(enhanced, width, height)
-        if image_bytes: used_provider = "fal"
-
-    # 9. api.airforce (no key needed)
-    if image_bytes is None:
-        image_bytes = _try_airforce(enhanced, width, height)
-        if image_bytes: used_provider = "airforce"
-
-    # 10. Pollinations authenticated
-    if image_bytes is None and poll_key:
-        try:
-            image_bytes   = generate_image_pollinations(enhanced, width=width,
-                                                         height=height, api_key=poll_key)
-            used_provider = "pollinations_auth"
-            logger.info("✅ Image via Pollinations (authenticated)")
-        except Exception as e:
-            logger.warning(f"Pollinations auth failed: {e}")
-
-    # 11. Pollinations anonymous — last fallback
+    # Always-on fallback: Pollinations anonymous (not in chain, guaranteed)
     if image_bytes is None:
         try:
             image_bytes   = generate_image_pollinations(enhanced, width=width, height=height)
             used_provider = "pollinations_anon"
-            logger.info("✅ Image via Pollinations (anonymous)")
+            logger.info("✅ Image via Pollinations (anonymous fallback)")
         except Exception as e:
-            logger.error(f"All providers failed: {e}")
+            logger.error(f"All image providers failed: {e}")
             raise RuntimeError(
-                "All image providers failed. "
-                "Tried: cloudflare→imagen→ideogram→openai→stability→"
-                "huggingface→together→fal→airforce→pollinations. "
-                f"Last error: {e}"
+                f"All image providers failed (chain: {img_chain}). Last error: {e}"
             )
 
     logger.info(f"Image provider used: {used_provider}")

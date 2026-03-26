@@ -80,22 +80,29 @@ def call_ai(provider: str, model_id: str, system_prompt: str, user_prompt: str,
     """
     from services.key_rotator import call_with_rotation
 
-    def _do_call(api_key: str) -> str:
-        # Store params as closure vars so the failover wrapper can read them
-        _model_id      = model_id       # noqa — referenced by failover wrapper
-        _system_prompt = system_prompt  # noqa
-        _user_prompt   = user_prompt    # noqa
-        _temperature   = temperature    # noqa
-        _max_tokens    = max_tokens     # noqa
+    # Capture params in a dict to make them accessible to the failover wrapper
+    _params = {
+        'model_id':      model_id,
+        'system_prompt': system_prompt,
+        'user_prompt':   user_prompt,
+        'temperature':   temperature,
+        'max_tokens':    max_tokens,
+        'provider':      provider,
+    }
 
-        if provider == "gemini":
-            return _call_gemini(api_key, model_id, system_prompt, user_prompt, temperature, max_tokens)
-        elif provider == "cohere":
-            return _call_cohere(api_key, model_id, system_prompt, user_prompt, temperature, max_tokens)
+    def _do_call(api_key: str) -> str:
+        p = _params  # noqa — failover wrapper reads _params from closure
+        if p['provider'] == "gemini":
+            return _call_gemini(api_key, p['model_id'], p['system_prompt'],
+                                p['user_prompt'], p['temperature'], p['max_tokens'])
+        elif p['provider'] == "cohere":
+            return _call_cohere(api_key, p['model_id'], p['system_prompt'],
+                                p['user_prompt'], p['temperature'], p['max_tokens'])
         else:
-            base_url = PROVIDER_BASE_URLS.get(provider, PROVIDER_BASE_URLS["openai"])
-            return _call_openai_compat(api_key, model_id, system_prompt, user_prompt,
-                                       temperature, max_tokens, base_url)
+            base_url = PROVIDER_BASE_URLS.get(p['provider'], PROVIDER_BASE_URLS["openai"])
+            return _call_openai_compat(api_key, p['model_id'], p['system_prompt'],
+                                       p['user_prompt'], p['temperature'],
+                                       p['max_tokens'], base_url)
 
     return call_with_rotation(provider, _do_call)
 

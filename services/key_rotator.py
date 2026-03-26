@@ -27,15 +27,45 @@ MAX_FAILS         = 3   # consecutive failures before marking exhausted
 RESET_AFTER_HOURS = 24  # auto-reset exhausted keys after N hours
 
 # ── Provider fallback chain ───────────────────────────────────────────────────
-# لو provider X فشل → يجرب الـ providers دي بالترتيب
-PROVIDER_FALLBACK_CHAIN = [
-    "gemini",
-    "groq",
-    "cohere",
-    "openrouter",
-    "airforce",   # مجاني — deepseek-v3, gemini-2.5-flash, gemma3 (free)
-    "openai",
+# الترتيب الافتراضي — يمكن تغييره من لوحة التحكم
+_DEFAULT_AI_CHAIN = [
+    "gemini", "groq", "cohere", "openrouter", "airforce", "openai",
 ]
+
+_DEFAULT_IMAGE_CHAIN = [
+    "cloudflare", "google_imagen", "ideogram", "openai_image",
+    "stability", "huggingface", "together", "fal", "airforce", "pollinations",
+]
+
+PROVIDER_FALLBACK_CHAIN = _DEFAULT_AI_CHAIN  # backward compat
+
+
+def get_ai_chain() -> list:
+    """Return AI provider chain from Config DB (or default)."""
+    try:
+        from database.models import Config
+        saved = Config.get("ai_provider_chain", "")
+        if saved:
+            chain = [p.strip() for p in saved.split(",") if p.strip()]
+            if chain:
+                return chain
+    except Exception:
+        pass
+    return list(_DEFAULT_AI_CHAIN)
+
+
+def get_image_chain() -> list:
+    """Return image provider chain from Config DB (or default)."""
+    try:
+        from database.models import Config
+        saved = Config.get("image_provider_chain", "")
+        if saved:
+            chain = [p.strip() for p in saved.split(",") if p.strip()]
+            if chain:
+                return chain
+    except Exception:
+        pass
+    return list(_DEFAULT_IMAGE_CHAIN)
 
 # ── Model equivalents across providers ───────────────────────────────────────
 PROVIDER_DEFAULT_MODELS = {
@@ -195,8 +225,9 @@ def call_with_rotation(provider: str, call_fn, *args, **kwargs):
     """
     from database.models import db, WorkflowLog
 
-    # Build provider chain: requested provider first, then fallbacks
-    chain = [provider] + [p for p in PROVIDER_FALLBACK_CHAIN if p != provider]
+    # Build provider chain: requested provider first, then fallbacks from Config
+    saved_chain = get_ai_chain()
+    chain = [provider] + [p for p in saved_chain if p != provider]
 
     tried = []
     for current_provider in chain:
@@ -266,51 +297,40 @@ def _get_config_key(provider: str) -> str:
 
 
 def _make_provider_wrapper(new_provider: str, original_call_fn, original_provider: str):
-    """
-    Create a wrapper that calls the new provider's API instead of the original.
-    Extracts closure variables safely from the original call_fn.
-    """
+    """Wrap call_fn to use a different provider. Reads _params from closure."""
     from services.ai_service import _call_gemini, _call_openai_compat, _call_cohere, PROVIDER_BASE_URLS
 
-    # Extract closure variables safely
-    closure_vars = {}
-    try:
-        if hasattr(original_call_fn, '__closure__') and original_call_fn.__closure__:
-            code = original_call_fn.__code__
-            freevars = code.co_freevars
-            cells = original_call_fn.__closure__
-            closure_vars = {
-                name: cell.cell_contents
-                for name, cell in zip(freevars, cells)
-                if hasattr(cell, 'cell_contents')
-            }
-    except Exception as e:
-        logger.debug(f"Could not extract closure vars: {e}")
-
-    # Get default model for new provider
     default_model = PROVIDER_DEFAULT_MODELS.get(new_provider, "")
     if not default_model:
         return None
 
-    # Read params from closure (set in ai_service.call_ai._do_call)
-    model_id      = closure_vars.get('model_id',      closure_vars.get('_model_id',      default_model))
-    system_prompt = closure_vars.get('system_prompt', closure_vars.get('_system_prompt', ''))
-    user_prompt   = closure_vars.get('user_prompt',   closure_vars.get('_user_prompt',   ''))
-    temperature   = closure_vars.get('temperature',   closure_vars.get('_temperature',   0.8))
-    max_tokens    = closure_vars.get('max_tokens',    closure_vars.get('_max_tokens',    2048))
+    params = {}
+    try:
+        if hasattr(original_call_fn, "__closure__") and original_call_fn.__closure__:
+            freevars = original_call_fn.__code__.co_freevars
+            cells    = original_call_fn.__closure__
+            cv = {name: cell.cell_contents
+                  for name, cell in zip(freevars, cells)
+                  if hasattr(cell, "cell_contents")}
+            params = cv.get("_params", {})
+    except Exception as e:
+        logger.debug(f"Could not extract _params: {e}")
+
+    sys_prompt  = params.get("system_prompt", "")
+    usr_prompt  = params.get("user_prompt",   "")
+    temperature = params.get("temperature",   0.8)
+    max_tokens  = params.get("max_tokens",    2048)
 
     def wrapper(api_key: str):
         if new_provider == "gemini":
-            return _call_gemini(api_key, default_model, system_prompt, user_prompt, temperature, max_tokens)
+            return _call_gemini(api_key, default_model, sys_prompt, usr_prompt, temperature, max_tokens)
         elif new_provider == "cohere":
-            return _call_cohere(api_key, default_model, system_prompt, user_prompt, temperature, max_tokens)
+            return _call_cohere(api_key, default_model, sys_prompt, usr_prompt, temperature, max_tokens)
         else:
             base_url = PROVIDER_BASE_URLS.get(new_provider, PROVIDER_BASE_URLS["openai"])
-            return _call_openai_compat(api_key, default_model, system_prompt, user_prompt,
-                                       temperature, max_tokens, base_url)
+            return _call_openai_compat(api_key, default_model, sys_prompt, usr_prompt, temperature, max_tokens, base_url)
 
     return wrapper
-
 
 # ── Admin helpers ─────────────────────────────────────────────────────────────
 

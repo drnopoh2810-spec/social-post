@@ -16,23 +16,40 @@ import logging
 logger = logging.getLogger(__name__)
 
 _redis_client = None
+_redis_failed  = False   # True = tried and failed, don't retry until reset
+
+
+def reset_redis_client():
+    """Force reconnect on next call (e.g. after REDIS_URL is set)."""
+    global _redis_client, _redis_failed
+    _redis_client = None
+    _redis_failed  = False
 
 
 def get_redis():
     """Get or create Redis client. Returns None if not configured."""
-    global _redis_client
+    global _redis_client, _redis_failed
+
     if _redis_client is not None:
         return _redis_client
 
-    # Try env first, then DB
-    url = os.environ.get('REDIS_URL', '')
+    # Don't retry if already failed in this session
+    # (unless reset_redis_client() was called)
+    if _redis_failed:
+        return None
+
+    # Try env ONLY first (avoid circular dependency with DB)
+    url = os.environ.get('REDIS_URL', '').strip()
+
+    # If not in env, try DB directly
     if not url:
         try:
-            from database.models import Config
-            url = Config.query.get('redis_url')
-            url = url.value if url else ''
+            from database.models import Config as _Cfg, db as _db
+            row = _db.session.get(_Cfg, 'redis_url')
+            url = row.value if row else ''
         except Exception:
             pass
+
     if not url:
         return None
 
@@ -48,14 +65,16 @@ def get_redis():
             socket_connect_timeout=5,
             socket_timeout=5,
             retry_on_timeout=True,
-            ssl_cert_reqs=None,   # Upstash self-signed cert
+            ssl_cert_reqs=None,
         )
         _redis_client.ping()
+        _redis_failed = False
         logger.info("Redis connected successfully")
         return _redis_client
     except Exception as e:
         logger.warning(f"Redis connection failed: {e} — falling back to DB only")
         _redis_client = None
+        _redis_failed  = True
         return None
 
 

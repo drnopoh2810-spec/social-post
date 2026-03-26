@@ -28,6 +28,75 @@
   بعد 24 ساعة يتم إعادة تفعيل المفاتيح المنتهية تلقائياً.
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PROVIDER CHAIN ORDER                                                    -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="card" style="margin-bottom:20px">
+  <div class="card-title">🔢 ترتيب الأولوية للمزودين</div>
+  <div class="info-box" style="margin-bottom:16px;font-size:13px">
+    اسحب وأفلت لإعادة الترتيب — الأول في القائمة = الأول في المحاولة.
+    المزود الأول هو <strong>الافتراضي</strong>.
+  </div>
+
+  <div class="grid-2">
+    <!-- AI Providers -->
+    <div>
+      <div style="font-weight:700;margin-bottom:10px;font-size:14px">🤖 مزودو النص (AI)</div>
+      <ul id="ai-chain-list" class="chain-list"></ul>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-primary btn-sm" onclick="saveChain('ai')">💾 حفظ الترتيب</button>
+        <button class="btn btn-secondary btn-sm" onclick="resetChain('ai')">↺ افتراضي</button>
+      </div>
+    </div>
+    <!-- Image Providers -->
+    <div>
+      <div style="font-weight:700;margin-bottom:10px;font-size:14px">🎨 مزودو الصور</div>
+      <ul id="image-chain-list" class="chain-list"></ul>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-primary btn-sm" onclick="saveChain('image')">💾 حفظ الترتيب</button>
+        <button class="btn btn-secondary btn-sm" onclick="resetChain('image')">↺ افتراضي</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.chain-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  min-height: 40px;
+}
+.chain-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: grab;
+  user-select: none;
+  transition: background .15s, border-color .15s;
+}
+.chain-item:active { cursor: grabbing; }
+.chain-item.dragging { opacity: .4; border-style: dashed; }
+.chain-item.drag-over { border-color: var(--accent); background: rgba(99,102,241,.1); }
+.chain-item .rank {
+  width: 22px; height: 22px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; flex-shrink: 0;
+}
+.chain-item .rank.first { background: #f59e0b; }
+.chain-item .drag-handle { color: var(--text3); font-size: 16px; cursor: grab; }
+.chain-item .provider-name { flex: 1; font-size: 13px; font-weight: 600; }
+.chain-item .provider-status { font-size: 11px; }
+</style>
+
 <!-- Failover Chain Status -->
 <div class="card" style="margin-bottom:20px">
   <div class="card-title">🔗 سلسلة الـ Failover (الترتيب التلقائي)</div>
@@ -391,5 +460,148 @@ function resetAllProviders(){
 // Load on page open + refresh every 30s
 refreshStatus();
 setInterval(refreshStatus, 30000);
+
+// ── Provider chain drag & drop ────────────────────────────────────────────────
+
+const AI_LABELS = {
+  gemini:     {icon:'🔵', name:'Google Gemini'},
+  groq:       {icon:'🟢', name:'Groq'},
+  cohere:     {icon:'🟡', name:'Cohere'},
+  openrouter: {icon:'🟠', name:'OpenRouter'},
+  airforce:   {icon:'🛩️', name:'api.airforce'},
+  openai:     {icon:'⚫', name:'OpenAI'},
+};
+const IMG_LABELS = {
+  cloudflare:   {icon:'☁️',  name:'Cloudflare Worker'},
+  google_imagen:{icon:'🔵',  name:'Google Imagen 4'},
+  ideogram:     {icon:'🎨',  name:'Ideogram v3'},
+  openai_image: {icon:'🟢',  name:'OpenAI Image'},
+  stability:    {icon:'🔷',  name:'Stability AI'},
+  huggingface:  {icon:'🤗',  name:'HuggingFace'},
+  together:     {icon:'🔗',  name:'Together AI'},
+  fal:          {icon:'⚡',  name:'Fal.ai'},
+  airforce:     {icon:'🛩️', name:'api.airforce'},
+  pollinations: {icon:'🌸',  name:'Pollinations'},
+};
+
+let chainData = {ai: [], image: [], ai_default: [], image_default: []};
+let dragSrc = null;
+
+function buildChainList(listId, items, labels, statusData) {
+  const ul = document.getElementById(listId);
+  ul.innerHTML = '';
+  items.forEach((name, idx) => {
+    const info   = labels[name] || {icon:'🔑', name};
+    const status = statusData?.[name];
+    const hasKey = status ? (status.available > 0 || status.has_config_key) : true;
+    const statusIcon = hasKey ? '✅' : '⚠️';
+
+    const li = document.createElement('li');
+    li.className = 'chain-item';
+    li.draggable = true;
+    li.dataset.name = name;
+    li.innerHTML = `
+      <span class="drag-handle">⠿</span>
+      <span class="rank ${idx===0?'first':''}">${idx+1}</span>
+      <span style="font-size:18px">${info.icon}</span>
+      <span class="provider-name">${info.name}</span>
+      <span class="provider-status">${statusIcon}</span>
+      ${idx===0 ? '<span style="font-size:10px;background:var(--accent);color:#fff;padding:2px 6px;border-radius:10px">افتراضي</span>' : ''}
+    `;
+
+    li.addEventListener('dragstart', e => {
+      dragSrc = li;
+      li.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    li.addEventListener('dragend', () => {
+      li.classList.remove('dragging');
+      ul.querySelectorAll('.chain-item').forEach(i => i.classList.remove('drag-over'));
+      rebuildRanks(ul);
+    });
+    li.addEventListener('dragover', e => {
+      e.preventDefault();
+      if(dragSrc && dragSrc !== li){
+        ul.querySelectorAll('.chain-item').forEach(i => i.classList.remove('drag-over'));
+        li.classList.add('drag-over');
+      }
+    });
+    li.addEventListener('drop', e => {
+      e.preventDefault();
+      if(dragSrc && dragSrc !== li){
+        const items = [...ul.querySelectorAll('.chain-item')];
+        const srcIdx = items.indexOf(dragSrc);
+        const dstIdx = items.indexOf(li);
+        if(srcIdx < dstIdx) ul.insertBefore(dragSrc, li.nextSibling);
+        else ul.insertBefore(dragSrc, li);
+        li.classList.remove('drag-over');
+        rebuildRanks(ul);
+      }
+    });
+    ul.appendChild(li);
+  });
+}
+
+function rebuildRanks(ul) {
+  ul.querySelectorAll('.chain-item').forEach((li, idx) => {
+    const rank = li.querySelector('.rank');
+    if(rank){ rank.textContent = idx+1; rank.className = 'rank' + (idx===0?' first':''); }
+    const badge = li.querySelector('span[style*="افتراضي"]');
+    if(idx === 0 && !badge){
+      const sp = document.createElement('span');
+      sp.style.cssText = 'font-size:10px;background:var(--accent);color:#fff;padding:2px 6px;border-radius:10px';
+      sp.textContent = 'افتراضي';
+      li.appendChild(sp);
+    } else if(idx !== 0 && badge){
+      badge.remove();
+    }
+  });
+}
+
+function getChainOrder(listId) {
+  return [...document.getElementById(listId).querySelectorAll('.chain-item')]
+    .map(li => li.dataset.name);
+}
+
+async function saveChain(type) {
+  const listId = type === 'ai' ? 'ai-chain-list' : 'image-chain-list';
+  const key    = type === 'ai' ? 'ai_chain' : 'image_chain';
+  const order  = getChainOrder(listId);
+  const r = await fetch('/api/provider-chain', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body: JSON.stringify({[key]: order})
+  });
+  const d = await r.json();
+  if(d.ok) toast(`✅ تم حفظ ترتيب ${type === 'ai' ? 'مزودي النص' : 'مزودي الصور'}`, 'green');
+  else toast('❌ خطأ في الحفظ', 'red');
+}
+
+function resetChain(type) {
+  if(!confirm('إعادة الترتيب للافتراضي؟')) return;
+  const items  = type === 'ai' ? chainData.ai_default : chainData.image_default;
+  const listId = type === 'ai' ? 'ai-chain-list' : 'image-chain-list';
+  const labels = type === 'ai' ? AI_LABELS : IMG_LABELS;
+  buildChainList(listId, items, labels, null);
+  saveChain(type);
+}
+
+async function loadChains() {
+  try {
+    const [chainRes, statusRes] = await Promise.all([
+      fetch('/api/provider-chain'),
+      fetch('/api/ai-keys/status'),
+    ]);
+    chainData = await chainRes.json();
+    const statusData = await statusRes.json();
+
+    buildChainList('ai-chain-list',    chainData.ai_chain,    AI_LABELS,  statusData);
+    buildChainList('image-chain-list', chainData.image_chain, IMG_LABELS, statusData);
+  } catch(e) {
+    console.warn('Could not load chains:', e);
+  }
+}
+
+loadChains();
 </script>
 {% endblock %}

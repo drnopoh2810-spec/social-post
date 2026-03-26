@@ -194,6 +194,13 @@ class Config(db.Model):
             row = Config(key=key, value=value)
             db.session.add(row)
         db.session.commit()
+        # If redis_url just changed, reset the client so it reconnects
+        if key == 'redis_url':
+            try:
+                from services.redis_config import reset_redis_client
+                reset_redis_client()
+            except Exception:
+                pass
         # Save to Redis
         try:
             from services.redis_config import redis_set

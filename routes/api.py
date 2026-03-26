@@ -1262,17 +1262,17 @@ def save_provider_chain():
 def redis_status():
     """Check Redis connection status and key count."""
     try:
-        from services.redis_config import reset_redis_client, _init_client, _exec, _rest_url
+        from services.redis_config import reset_redis_client, _init_client, _client
         reset_redis_client()
         connected = _init_client()
         if not connected:
             return jsonify({'ok': False, 'connected': False,
-                            'error': 'REDIS_URL غير مضبوط أو الاتصال فشل — تأكد من الـ URL في /config'})
-        keys = _exec(["KEYS", "config:*"]) or []
+                            'error': 'تعذّر الاتصال — تحقق من REDIS_URL في /config'})
+        keys = _client.keys('config:*') or []
         return jsonify({
             'ok': True, 'connected': True,
             'keys_count': len(keys),
-            'message': f'✅ متصل عبر REST API — {len(keys)} مفتاح محفوظ'
+            'message': f'✅ متصل عبر Upstash SDK — {len(keys)} مفتاح محفوظ'
         })
     except Exception as e:
         return jsonify({'ok': False, 'connected': False, 'error': str(e)[:200]})
@@ -1283,12 +1283,12 @@ def redis_status():
 def redis_force_sync():
     """Force sync DB → Redis."""
     try:
-        from services.redis_config import sync_db_to_redis, reset_redis_client, _init_client, _exec
+        from services.redis_config import sync_db_to_redis, reset_redis_client, _init_client, _client
         reset_redis_client()
         if not _init_client():
             return jsonify({'ok': False, 'error': 'Redis غير متصل — تحقق من REDIS_URL'})
         sync_db_to_redis()
-        keys = _exec(["KEYS", "config:*"]) or []
+        keys = _client.keys('config:*') or []
         return jsonify({'ok': True, 'message': f'✅ تم sync {len(keys)} مفتاح إلى Redis'})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]})

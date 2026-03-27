@@ -14,6 +14,7 @@ app_port: 7860
 # 🧠 Social Post Manager
 ### Enterprise-Grade AI-Powered Content Automation Platform
 
+
 [![CI](https://github.com/drnopoh2810-spec/social-post/actions/workflows/ci.yml/badge.svg)](https://github.com/drnopoh2810-spec/social-post/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
